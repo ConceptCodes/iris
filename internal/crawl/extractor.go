@@ -14,13 +14,15 @@ import (
 )
 
 type htmlDiscovery struct {
-	imageURLs []string
-	pageURLs  []string
+	imageURLs    []string
+	pageURLs     []string
+	canonicalURL string
 }
 
 type HTMLDiscovery struct {
-	ImageURLs []string
-	PageURLs  []string
+	ImageURLs    []string
+	PageURLs     []string
+	CanonicalURL string
 }
 
 func extractHTMLLinks(r io.Reader, base *url.URL, allowedDomains []string) (htmlDiscovery, error) {
@@ -37,6 +39,14 @@ func extractHTMLLinks(r io.Reader, base *url.URL, allowedDomains []string) (html
 	walk = func(node *html.Node) {
 		if node.Type == html.ElementNode {
 			switch node.Data {
+			case "link":
+				if attrContainsToken(node, "rel", "canonical") {
+					if href := attr(node, "href"); href != "" && result.canonicalURL == "" {
+						if resolved, ok := resolveHTTPURL(base, href, allowedDomains); ok {
+							result.canonicalURL = resolved
+						}
+					}
+				}
 			case "img":
 				if src := attr(node, "src"); src != "" {
 					if resolved, ok := resolveHTTPURL(base, src, allowedDomains); ok {
@@ -81,8 +91,9 @@ func ExtractHTMLLinks(r io.Reader, rawBase string, allowedDomains []string) (HTM
 		return HTMLDiscovery{}, err
 	}
 	return HTMLDiscovery{
-		ImageURLs: result.imageURLs,
-		PageURLs:  result.pageURLs,
+		ImageURLs:    result.imageURLs,
+		PageURLs:     result.pageURLs,
+		CanonicalURL: result.canonicalURL,
 	}, nil
 }
 
@@ -199,4 +210,14 @@ func attr(node *html.Node, key string) string {
 		}
 	}
 	return ""
+}
+
+func attrContainsToken(node *html.Node, key, token string) bool {
+	value := strings.ToLower(attr(node, key))
+	for _, part := range strings.Fields(value) {
+		if part == token {
+			return true
+		}
+	}
+	return false
 }

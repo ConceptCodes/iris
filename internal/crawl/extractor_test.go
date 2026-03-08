@@ -10,6 +10,7 @@ func TestExtractHTMLLinks(t *testing.T) {
 	base, _ := url.Parse("https://example.com/gallery")
 	doc := `
 	<html><body>
+		<link rel="canonical" href="/gallery">
 		<img src="/img/cat.jpg">
 		<a href="/page-2">next</a>
 		<a href="https://example.com/static/dog.png">dog</a>
@@ -25,6 +26,9 @@ func TestExtractHTMLLinks(t *testing.T) {
 	}
 	if len(result.pageURLs) != 1 {
 		t.Fatalf("expected 1 page url, got %d", len(result.pageURLs))
+	}
+	if result.canonicalURL != "https://example.com/gallery" {
+		t.Fatalf("unexpected canonical url: %q", result.canonicalURL)
 	}
 }
 
