@@ -11,6 +11,13 @@ func TestLoadServerDefaults(t *testing.T) {
 	t.Setenv("CLIP_DIM", "")
 	t.Setenv("HTTP_ADDR", "")
 	t.Setenv("ASSET_DIR", "")
+	t.Setenv("ASSET_BACKEND", "")
+	t.Setenv("ASSET_S3_BUCKET", "")
+	t.Setenv("ASSET_S3_REGION", "")
+	t.Setenv("ASSET_S3_ENDPOINT", "")
+	t.Setenv("ASSET_S3_PREFIX", "")
+	t.Setenv("ASSET_S3_PUBLIC_BASE", "")
+	t.Setenv("ASSET_S3_PATH_STYLE", "")
 	t.Setenv("JOB_BACKEND", "")
 	t.Setenv("JOB_STORE_DSN", "")
 	t.Setenv("ADMIN_API_KEY", "")
@@ -32,6 +39,24 @@ func TestLoadServerDefaults(t *testing.T) {
 	if cfg.AssetDir != defaultAssetDir {
 		t.Fatalf("expected default asset dir, got %q", cfg.AssetDir)
 	}
+	if cfg.AssetBackend != defaultAssetBackend {
+		t.Fatalf("expected default asset backend, got %q", cfg.AssetBackend)
+	}
+	if cfg.AssetBucket != defaultAssetBucket {
+		t.Fatalf("expected default asset bucket, got %q", cfg.AssetBucket)
+	}
+	if cfg.AssetRegion != defaultAssetRegion {
+		t.Fatalf("expected default asset region, got %q", cfg.AssetRegion)
+	}
+	if cfg.AssetEndpoint != defaultAssetEndpoint {
+		t.Fatalf("expected default asset endpoint, got %q", cfg.AssetEndpoint)
+	}
+	if cfg.AssetPrefix != defaultAssetPrefix {
+		t.Fatalf("expected default asset prefix, got %q", cfg.AssetPrefix)
+	}
+	if cfg.AssetPublicBase != defaultAssetPublicBase {
+		t.Fatalf("expected default asset public base, got %q", cfg.AssetPublicBase)
+	}
 	if cfg.JobBackend != defaultJobBackend {
 		t.Fatalf("expected default job backend, got %q", cfg.JobBackend)
 	}
@@ -49,6 +74,13 @@ func TestLoadIndexerOverrides(t *testing.T) {
 	t.Setenv("CLIP_DIM", "768")
 	t.Setenv("CONCURRENCY", "12")
 	t.Setenv("ASSET_DIR", "/tmp/assets")
+	t.Setenv("ASSET_BACKEND", "s3")
+	t.Setenv("ASSET_S3_BUCKET", "bucket")
+	t.Setenv("ASSET_S3_REGION", "us-east-1")
+	t.Setenv("ASSET_S3_ENDPOINT", "http://minio:9000")
+	t.Setenv("ASSET_S3_PREFIX", "images")
+	t.Setenv("ASSET_S3_PUBLIC_BASE", "https://cdn.example.com")
+	t.Setenv("ASSET_S3_PATH_STYLE", "true")
 
 	cfg := LoadIndexer()
 
@@ -66,6 +98,27 @@ func TestLoadIndexerOverrides(t *testing.T) {
 	}
 	if cfg.AssetDir != "/tmp/assets" {
 		t.Fatalf("unexpected asset dir: %q", cfg.AssetDir)
+	}
+	if cfg.AssetBackend != "s3" {
+		t.Fatalf("unexpected asset backend: %q", cfg.AssetBackend)
+	}
+	if cfg.AssetBucket != "bucket" {
+		t.Fatalf("unexpected asset bucket: %q", cfg.AssetBucket)
+	}
+	if cfg.AssetRegion != "us-east-1" {
+		t.Fatalf("unexpected asset region: %q", cfg.AssetRegion)
+	}
+	if cfg.AssetEndpoint != "http://minio:9000" {
+		t.Fatalf("unexpected asset endpoint: %q", cfg.AssetEndpoint)
+	}
+	if cfg.AssetPrefix != "images" {
+		t.Fatalf("unexpected asset prefix: %q", cfg.AssetPrefix)
+	}
+	if cfg.AssetPublicBase != "https://cdn.example.com" {
+		t.Fatalf("unexpected asset public base: %q", cfg.AssetPublicBase)
+	}
+	if !cfg.AssetPathStyle {
+		t.Fatalf("expected asset path style true")
 	}
 }
 
@@ -96,6 +149,7 @@ func TestLoadWorkerDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("ROBOTS_CACHE_TTL", "12h")
 	t.Setenv("CACHE_PRUNE_INTERVAL", "20m")
 	t.Setenv("CACHE_PRUNE_BATCH", "250")
+	t.Setenv("SCHEDULE_POLL_INTERVAL", "45s")
 
 	cfg := LoadWorker()
 
@@ -110,6 +164,9 @@ func TestLoadWorkerDefaultsAndOverrides(t *testing.T) {
 	}
 	if cfg.JobPollInterval != 2*time.Second {
 		t.Fatalf("unexpected poll interval: %s", cfg.JobPollInterval)
+	}
+	if cfg.SchedulePollInterval != 45*time.Second {
+		t.Fatalf("unexpected schedule poll interval: %s", cfg.SchedulePollInterval)
 	}
 	if cfg.LeaseDuration != 45*time.Second {
 		t.Fatalf("unexpected lease duration: %s", cfg.LeaseDuration)

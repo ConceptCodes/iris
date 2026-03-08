@@ -13,6 +13,12 @@ const (
 	defaultHTTPAddr        = ":8080"
 	defaultConcurrency     = 4
 	defaultAssetDir        = "./data/assets"
+	defaultAssetBackend    = "local"
+	defaultAssetBucket     = ""
+	defaultAssetRegion     = ""
+	defaultAssetEndpoint   = ""
+	defaultAssetPrefix     = ""
+	defaultAssetPublicBase = ""
 	defaultWorkerMode      = "indexer"
 	defaultJobBackend      = "memory"
 	defaultJobStoreDSN     = "postgres://iris:iris@localhost:5432/iris?sslmode=disable"
@@ -28,10 +34,20 @@ const (
 )
 
 type Shared struct {
-	ClipAddr   string
-	QdrantAddr string
-	ClipDim    int
-	AssetDir   string
+	ClipAddr        string
+	QdrantAddr      string
+	ClipDim         int
+	AssetDir        string
+	AssetBackend    string
+	AssetBucket     string
+	AssetRegion     string
+	AssetEndpoint   string
+	AssetAccessKey  string
+	AssetSecretKey  string
+	AssetSessionKey string
+	AssetPrefix     string
+	AssetPublicBase string
+	AssetPathStyle  bool
 }
 
 type Server struct {
@@ -49,18 +65,19 @@ type Indexer struct {
 
 type Worker struct {
 	Shared
-	Mode               string
-	JobBackend         string
-	JobStoreDSN        string
-	JobPollInterval    time.Duration
-	LeaseDuration      time.Duration
-	FetchRetries       int
-	FetchRetryBackoff  time.Duration
-	HostConcurrency    int
-	HTTPCacheTTL       time.Duration
-	RobotsCacheTTL     time.Duration
-	CachePruneInterval time.Duration
-	CachePruneBatch    int
+	Mode                 string
+	JobBackend           string
+	JobStoreDSN          string
+	JobPollInterval      time.Duration
+	SchedulePollInterval time.Duration
+	LeaseDuration        time.Duration
+	FetchRetries         int
+	FetchRetryBackoff    time.Duration
+	HostConcurrency      int
+	HTTPCacheTTL         time.Duration
+	RobotsCacheTTL       time.Duration
+	CachePruneInterval   time.Duration
+	CachePruneBatch      int
 }
 
 func LoadServer() Server {
@@ -107,6 +124,10 @@ func LoadWorker() Worker {
 		JobPollInterval: getEnvDuration(
 			"JOB_POLL_INTERVAL",
 			time.Second,
+		),
+		SchedulePollInterval: getEnvDuration(
+			"SCHEDULE_POLL_INTERVAL",
+			30*time.Second,
 		),
 		LeaseDuration: getEnvDuration(
 			"LEASE_DURATION",
@@ -161,6 +182,46 @@ func loadShared() Shared {
 			"ASSET_DIR",
 			defaultAssetDir,
 		),
+		AssetBackend: getEnv(
+			"ASSET_BACKEND",
+			defaultAssetBackend,
+		),
+		AssetBucket: getEnv(
+			"ASSET_S3_BUCKET",
+			defaultAssetBucket,
+		),
+		AssetRegion: getEnv(
+			"ASSET_S3_REGION",
+			defaultAssetRegion,
+		),
+		AssetEndpoint: getEnv(
+			"ASSET_S3_ENDPOINT",
+			defaultAssetEndpoint,
+		),
+		AssetAccessKey: getEnv(
+			"ASSET_S3_ACCESS_KEY",
+			"",
+		),
+		AssetSecretKey: getEnv(
+			"ASSET_S3_SECRET_KEY",
+			"",
+		),
+		AssetSessionKey: getEnv(
+			"ASSET_S3_SESSION_TOKEN",
+			"",
+		),
+		AssetPrefix: getEnv(
+			"ASSET_S3_PREFIX",
+			defaultAssetPrefix,
+		),
+		AssetPublicBase: getEnv(
+			"ASSET_S3_PUBLIC_BASE",
+			defaultAssetPublicBase,
+		),
+		AssetPathStyle: getEnvBool(
+			"ASSET_S3_PATH_STYLE",
+			false,
+		),
 	}
 }
 
@@ -190,6 +251,18 @@ func getEnvDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return def
+	}
+	return parsed
+}
+
+func getEnvBool(key string, def bool) bool {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return def
+	}
+	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return def
 	}

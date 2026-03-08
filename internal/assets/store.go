@@ -11,19 +11,24 @@ import (
 
 const defaultFileMode = 0o644
 
-type Store struct {
+type Store interface {
+	Save(id, filename string, data []byte) (string, error)
+	LocalDir() (string, bool)
+}
+
+type LocalStore struct {
 	dir string
 }
 
-func NewStore(dir string) *Store {
-	return &Store{dir: dir}
+func NewStore(dir string) Store {
+	return &LocalStore{dir: dir}
 }
 
-func (s *Store) Dir() string {
-	return s.dir
+func (s *LocalStore) LocalDir() (string, bool) {
+	return s.dir, true
 }
 
-func (s *Store) Save(id, filename string, data []byte) (string, error) {
+func (s *LocalStore) Save(id, filename string, data []byte) (string, error) {
 	if id == "" {
 		return "", fmt.Errorf("asset id is required")
 	}
