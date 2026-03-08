@@ -90,7 +90,56 @@ func (s *MemoryStore) GetRun(ctx context.Context, id string) (Run, error) {
 	return Run{}, fmt.Errorf("run not found: %s", id)
 }
 
-func (s *MemoryStore) MarkRunCompleted(ctx context.Context, id string, discovered, indexed, failed int) error {
+func (s *MemoryStore) SetRunDiscovered(ctx context.Context, id string, discovered int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, run := range s.runs {
+		if run.ID != id {
+			continue
+		}
+		run.DiscoveredCount = discovered
+		run.UpdatedAt = time.Now().UTC()
+		s.runs[index] = run
+		return nil
+	}
+	return fmt.Errorf("run not found: %s", id)
+}
+
+func (s *MemoryStore) IncrementRunIndexed(ctx context.Context, id string, delta int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, run := range s.runs {
+		if run.ID != id {
+			continue
+		}
+		run.IndexedCount += delta
+		run.UpdatedAt = time.Now().UTC()
+		s.runs[index] = run
+		return nil
+	}
+	return fmt.Errorf("run not found: %s", id)
+}
+
+func (s *MemoryStore) IncrementRunFailed(ctx context.Context, id string, delta int, lastError string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, run := range s.runs {
+		if run.ID != id {
+			continue
+		}
+		run.FailedCount += delta
+		run.LastError = lastError
+		run.UpdatedAt = time.Now().UTC()
+		s.runs[index] = run
+		return nil
+	}
+	return fmt.Errorf("run not found: %s", id)
+}
+
+func (s *MemoryStore) MarkRunCompleted(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -99,9 +148,6 @@ func (s *MemoryStore) MarkRunCompleted(ctx context.Context, id string, discovere
 			continue
 		}
 		run.Status = RunStatusCompleted
-		run.DiscoveredCount = discovered
-		run.IndexedCount = indexed
-		run.FailedCount = failed
 		run.UpdatedAt = time.Now().UTC()
 		s.runs[index] = run
 		return nil
@@ -109,7 +155,7 @@ func (s *MemoryStore) MarkRunCompleted(ctx context.Context, id string, discovere
 	return fmt.Errorf("run not found: %s", id)
 }
 
-func (s *MemoryStore) MarkRunFailed(ctx context.Context, id, message string, discovered, indexed, failed int) error {
+func (s *MemoryStore) MarkRunFailed(ctx context.Context, id, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -118,9 +164,6 @@ func (s *MemoryStore) MarkRunFailed(ctx context.Context, id, message string, dis
 			continue
 		}
 		run.Status = RunStatusFailed
-		run.DiscoveredCount = discovered
-		run.IndexedCount = indexed
-		run.FailedCount = failed
 		run.LastError = message
 		run.UpdatedAt = time.Now().UTC()
 		s.runs[index] = run

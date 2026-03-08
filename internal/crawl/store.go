@@ -8,7 +8,10 @@ type Store interface {
 	CreateRun(ctx context.Context, sourceID, trigger string) (Run, error)
 	ListRuns(ctx context.Context) ([]Run, error)
 	GetRun(ctx context.Context, id string) (Run, error)
-	MarkRunCompleted(ctx context.Context, id string, discovered, indexed, failed int) error
-	MarkRunFailed(ctx context.Context, id, message string, discovered, indexed, failed int) error
+	SetRunDiscovered(ctx context.Context, id string, discovered int) error
+	IncrementRunIndexed(ctx context.Context, id string, delta int) error
+	IncrementRunFailed(ctx context.Context, id string, delta int, lastError string) error
+	MarkRunCompleted(ctx context.Context, id string) error
+	MarkRunFailed(ctx context.Context, id, message string) error
 	Close() error
 }

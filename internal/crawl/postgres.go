@@ -114,16 +114,40 @@ func (s *PostgresStore) GetRun(ctx context.Context, id string) (Run, error) {
 	return scanRun(row)
 }
 
-func (s *PostgresStore) MarkRunCompleted(ctx context.Context, id string, discovered, indexed, failed int) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE crawl_runs SET status = $2, discovered_count = $3, indexed_count = $4, failed_count = $5, last_error = '', updated_at = $6 WHERE id = $1`, id, string(RunStatusCompleted), discovered, indexed, failed, time.Now().UTC())
+func (s *PostgresStore) SetRunDiscovered(ctx context.Context, id string, discovered int) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE crawl_runs SET discovered_count = $2, updated_at = $3 WHERE id = $1`, id, discovered, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("set run discovered: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) IncrementRunIndexed(ctx context.Context, id string, delta int) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE crawl_runs SET indexed_count = indexed_count + $2, updated_at = $3 WHERE id = $1`, id, delta, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("increment run indexed: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) IncrementRunFailed(ctx context.Context, id string, delta int, lastError string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE crawl_runs SET failed_count = failed_count + $2, last_error = $3, updated_at = $4 WHERE id = $1`, id, delta, lastError, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("increment run failed: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) MarkRunCompleted(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE crawl_runs SET status = $2, updated_at = $3 WHERE id = $1`, id, string(RunStatusCompleted), time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("mark run completed: %w", err)
 	}
 	return nil
 }
 
-func (s *PostgresStore) MarkRunFailed(ctx context.Context, id, message string, discovered, indexed, failed int) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE crawl_runs SET status = $2, discovered_count = $3, indexed_count = $4, failed_count = $5, last_error = $6, updated_at = $7 WHERE id = $1`, id, string(RunStatusFailed), discovered, indexed, failed, message, time.Now().UTC())
+func (s *PostgresStore) MarkRunFailed(ctx context.Context, id, message string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE crawl_runs SET status = $2, last_error = $3, updated_at = $4 WHERE id = $1`, id, string(RunStatusFailed), message, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("mark run failed: %w", err)
 	}
