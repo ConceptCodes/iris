@@ -1,4 +1,4 @@
-module github.com/davidojo/google-images
+module iris
 
 go 1.23.0
 

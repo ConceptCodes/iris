@@ -51,6 +51,9 @@ services:
       - QDRANT_ADDR=qdrant:6334
       - CLIP_DIM=512
       - HTTP_ADDR=:8080
+      - ASSET_DIR=/data/assets
+    volumes:
+      - ./data/assets:/data/assets
     depends_on:
       qdrant:
         condition: service_healthy

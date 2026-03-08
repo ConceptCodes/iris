@@ -47,12 +47,21 @@ the server.
 docker compose up --build
 ```
 
+Or, with `just` installed:
+
+```bash
+just dev
+```
+
 This starts:
 | Service | Port | Purpose |
 |---------|------|---------|
 | `qdrant` | 6333 (REST), 6334 (gRPC) | Vector DB |
 | `clip`   | 8001 | CLIP embedding sidecar |
 | `server` | 8080 | Go API |
+
+The Compose setup mounts `./data/assets` into the server container so images
+indexed from local files or uploads remain renderable in the UI.
 
 ---
 
@@ -80,6 +89,9 @@ curl -X POST http://localhost:8080/index/upload \
   -F tags="dog,animal" \
   -F meta_category=pets
 ```
+
+Uploaded images are stored locally and served back from `/assets/...`, so they
+can appear in the UI after indexing.
 
 ### Text → image search
 
@@ -143,7 +155,16 @@ go run ./cmd/indexer -mode dir -input ./images
 
 # Index from a URL list (one URL per line)
 go run ./cmd/indexer -mode urls -input urls.txt
+
+# Bootstrap a small demo corpus immediately
+go run ./cmd/indexer -mode urls -input ./examples/demo-urls.txt
 ```
+
+Common developer flows are also available in [Justfile](/Users/davidojo/Desktop/go-projects/google-images/Justfile):
+`just build`, `just test`, `just run-server`, `just index-demo`.
+
+Directory mode now reads local files directly, stores them under `ASSET_DIR`,
+and indexes the stored asset URL so results can render in the browser.
 
 ---
 
@@ -156,6 +177,7 @@ go run ./cmd/indexer -mode urls -input urls.txt
 | `CLIP_DIM` | `512` | Embedding dimension (512 = ViT-B/32, 768 = ViT-L/14) |
 | `HTTP_ADDR` | `:8080` | Go server listen address |
 | `CONCURRENCY` | `4` | Indexer worker count |
+| `ASSET_DIR` | `./data/assets` | Filesystem path for uploaded/local indexed image assets |
 
 ---
 
