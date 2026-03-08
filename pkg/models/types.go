@@ -1,0 +1,50 @@
+package models
+
+type Embedding []float32
+
+type ImageRecord struct {
+	ID       string            `json:"id"`
+	URL      string            `json:"url"`
+	Filename string            `json:"filename,omitempty"`
+	Tags     []string          `json:"tags,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
+}
+
+type SearchResult struct {
+	Record ImageRecord `json:"record"`
+	Score  float32     `json:"score"`
+}
+
+type IndexRequest struct {
+	URL      string            `json:"url"`
+	Filename string            `json:"filename,omitempty"`
+	Tags     []string          `json:"tags,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
+}
+
+type TextSearchRequest struct {
+	Query   string            `json:"query"`
+	TopK    int               `json:"top_k,omitempty"`
+	Filters map[string]string `json:"filters,omitempty"`
+}
+
+type TextSearchResponse struct {
+	Results []SearchResult `json:"results"`
+	Query   string         `json:"query"`
+	TookMs  int64          `json:"took_ms"`
+}
+
+type ImageSearchResponse struct {
+	Results []SearchResult `json:"results"`
+	Query   string         `json:"query,omitempty"`
+	TookMs  int64          `json:"took_ms"`
+}
+
+type IndexResponse struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
