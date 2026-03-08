@@ -15,7 +15,6 @@ var filterChips = []struct {
 	{"All", ""},
 	{"Shopping", "shopping"},
 	{"News", "news"},
-	{"Videos", "videos"},
 	{"Faces", "faces"},
 	{"Photo", "photo"},
 	{"Clip art", "clipart"},
@@ -27,7 +26,7 @@ func chipClass(active bool) string {
 	if active {
 		return "rounded-full px-3 py-1 text-sm bg-gray-800 text-white"
 	}
-	return "rounded-full px-3 py-1 text-sm bg-gray-100 text-gray-700 hover:bg-gray-200"
+	return "rounded-full px-3 py-1 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
 }
 
 func FilterChips(query string, active string) templ.Component {
@@ -51,7 +50,7 @@ func FilterChips(query string, active string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"overflow-x-auto no-scrollbar border-b border-gray-200 bg-white\"><div class=\"flex gap-2 px-4 py-2 whitespace-nowrap max-w-[1520px] mx-auto\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"overflow-x-auto no-scrollbar border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900\"><div class=\"flex gap-2 px-4 py-2 whitespace-nowrap max-w-[1520px] mx-auto\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -68,7 +67,7 @@ func FilterChips(query string, active string) templ.Component {
 			var templ_7745c5c3_Var3 templ.SafeURL
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL("/search?q=" + query + "&type=" + chip.Value))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/filter_chips.templ`, Line: 29, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/filter_chips.templ`, Line: 28, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -94,7 +93,7 @@ func FilterChips(query string, active string) templ.Component {
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(chip.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/filter_chips.templ`, Line: 30, Col: 17}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/filter_chips.templ`, Line: 29, Col: 17}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {

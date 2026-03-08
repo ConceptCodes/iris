@@ -7,7 +7,6 @@ var filterChips = []struct {
 	{"All", ""},
 	{"Shopping", "shopping"},
 	{"News", "news"},
-	{"Videos", "videos"},
 	{"Faces", "faces"},
 	{"Photo", "photo"},
 	{"Clip art", "clipart"},
@@ -19,11 +18,11 @@ func chipClass(active bool) string {
 	if active {
 		return "rounded-full px-3 py-1 text-sm bg-gray-800 text-white"
 	}
-	return "rounded-full px-3 py-1 text-sm bg-gray-100 text-gray-700 hover:bg-gray-200"
+	return "rounded-full px-3 py-1 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
 }
 
 templ FilterChips(query string, active string) {
-	<div class="overflow-x-auto no-scrollbar border-b border-gray-200 bg-white">
+	<div class="overflow-x-auto no-scrollbar border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
 		<div class="flex gap-2 px-4 py-2 whitespace-nowrap max-w-[1520px] mx-auto">
 			for _, chip := range filterChips {
 				<a href={ templ.URL("/search?q=" + query + "&type=" + chip.Value) } class={ chipClass(active == chip.Value) }>
