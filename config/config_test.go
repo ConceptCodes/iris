@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadServerDefaults(t *testing.T) {
 	t.Setenv("CLIP_ADDR", "")
@@ -65,5 +68,27 @@ func TestLoadIndexerInvalidIntFallbacks(t *testing.T) {
 	}
 	if cfg.Concurrency != defaultConcurrency {
 		t.Fatalf("expected default concurrency fallback, got %d", cfg.Concurrency)
+	}
+}
+
+func TestLoadWorkerDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("WORKER_MODE", "crawler")
+	t.Setenv("JOB_BACKEND", "memory")
+	t.Setenv("JOB_POLL_INTERVAL", "2s")
+	t.Setenv("LEASE_DURATION", "45s")
+
+	cfg := LoadWorker()
+
+	if cfg.Mode != "crawler" {
+		t.Fatalf("unexpected mode: %q", cfg.Mode)
+	}
+	if cfg.JobBackend != "memory" {
+		t.Fatalf("unexpected backend: %q", cfg.JobBackend)
+	}
+	if cfg.JobPollInterval != 2*time.Second {
+		t.Fatalf("unexpected poll interval: %s", cfg.JobPollInterval)
+	}
+	if cfg.LeaseDuration != 45*time.Second {
+		t.Fatalf("unexpected lease duration: %s", cfg.LeaseDuration)
 	}
 }
