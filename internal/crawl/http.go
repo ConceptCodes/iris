@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"iris/internal/constants"
 )
 
 type CachedFetcher struct {
@@ -51,16 +53,16 @@ func NewCachedFetcher(client *http.Client, userAgent string, options FetcherOpti
 		client = http.DefaultClient
 	}
 	if strings.TrimSpace(userAgent) == "" {
-		userAgent = defaultCrawlerUserAgent
+		userAgent = constants.DefaultCrawlerUserAgent
 	}
 	if options.DefaultTTL <= 0 {
-		options.DefaultTTL = 5 * time.Minute
+		options.DefaultTTL = constants.DefaultTTL5m
 	}
 	if options.RetryBackoff <= 0 {
-		options.RetryBackoff = 500 * time.Millisecond
+		options.RetryBackoff = constants.BackoffDelay500ms
 	}
 	if options.HostConcurrency <= 0 {
-		options.HostConcurrency = 2
+		options.HostConcurrency = constants.DefaultHostConcurrency
 	}
 	if options.Store == nil {
 		options.Store = NewNoopCacheStore()
@@ -136,13 +138,13 @@ func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cac
 	if err != nil {
 		return FetchResult{}, false, 0, err
 	}
-	req.Header.Set("User-Agent", f.userAgent)
+	req.Header.Set(constants.HeaderUserAgent, f.userAgent)
 	if hasCached {
 		if cached.etag != "" {
-			req.Header.Set("If-None-Match", cached.etag)
+			req.Header.Set(constants.HeaderIfNoneMatch, cached.etag)
 		}
 		if cached.lastModified != "" {
-			req.Header.Set("If-Modified-Since", cached.lastModified)
+			req.Header.Set(constants.HeaderIfModifiedSince, cached.lastModified)
 		}
 	}
 
@@ -161,8 +163,8 @@ func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cac
 		}
 		resource := cachedResource{
 			body:         append([]byte(nil), body...),
-			etag:         resp.Header.Get("ETag"),
-			lastModified: resp.Header.Get("Last-Modified"),
+			etag:         resp.Header.Get(constants.HeaderETag),
+			lastModified: resp.Header.Get(constants.HeaderLastModified),
 			expiresAt:    expirationFromHeaders(resp.Header, now, f.defaultTTL),
 		}
 		f.mu.Lock()
@@ -177,10 +179,10 @@ func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cac
 			return FetchResult{}, false, 0, fmt.Errorf("conditional fetch without cached body: %s", normalizedURL)
 		}
 		cached.expiresAt = expirationFromHeaders(resp.Header, now, f.defaultTTL)
-		if etag := resp.Header.Get("ETag"); etag != "" {
+		if etag := resp.Header.Get(constants.HeaderETag); etag != "" {
 			cached.etag = etag
 		}
-		if lastModified := resp.Header.Get("Last-Modified"); lastModified != "" {
+		if lastModified := resp.Header.Get(constants.HeaderLastModified); lastModified != "" {
 			cached.lastModified = lastModified
 		}
 		f.mu.Lock()
@@ -196,7 +198,7 @@ func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cac
 }
 
 func expirationFromHeaders(header http.Header, now time.Time, fallback time.Duration) time.Time {
-	for _, directive := range strings.Split(header.Get("Cache-Control"), ",") {
+	for _, directive := range strings.Split(header.Get(constants.HeaderCacheControl), ",") {
 		directive = strings.TrimSpace(strings.ToLower(directive))
 		if strings.HasPrefix(directive, "max-age=") {
 			seconds, err := strconv.Atoi(strings.TrimPrefix(directive, "max-age="))
@@ -206,7 +208,7 @@ func expirationFromHeaders(header http.Header, now time.Time, fallback time.Dura
 		}
 	}
 
-	if expires := header.Get("Expires"); expires != "" {
+	if expires := header.Get(constants.HeaderExpires); expires != "" {
 		if parsed, err := http.ParseTime(expires); err == nil {
 			return parsed.UTC()
 		}
@@ -266,7 +268,7 @@ func isRetryableStatus(statusCode int) bool {
 }
 
 func retryAfterDelay(header http.Header) time.Duration {
-	value := strings.TrimSpace(header.Get("Retry-After"))
+	value := strings.TrimSpace(header.Get(constants.HeaderRetryAfter))
 	if value == "" {
 		return 0
 	}

@@ -7,25 +7,9 @@ import (
 	"path"
 	"sort"
 	"strings"
-)
 
-var droppedQueryParams = map[string]struct{}{
-	"fbclid":       {},
-	"gclid":        {},
-	"mc_cid":       {},
-	"mc_eid":       {},
-	"msclkid":      {},
-	"ref":          {},
-	"ref_src":      {},
-	"source":       {},
-	"utm_campaign": {},
-	"utm_content":  {},
-	"utm_id":       {},
-	"utm_medium":   {},
-	"utm_name":     {},
-	"utm_source":   {},
-	"utm_term":     {},
-}
+	"iris/internal/constants"
+)
 
 func NormalizeURL(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
@@ -35,7 +19,7 @@ func NormalizeURL(raw string) (string, error) {
 	if parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("absolute url required")
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+	if parsed.Scheme != constants.SchemeHTTP && parsed.Scheme != constants.SchemeHTTPS {
 		return "", fmt.Errorf("unsupported url scheme: %s", parsed.Scheme)
 	}
 	return normalizeURL(parsed), nil
@@ -65,9 +49,9 @@ func normalizeHost(scheme, host string) string {
 	}
 
 	switch {
-	case scheme == "http" && port == "80":
+	case scheme == constants.SchemeHTTP && port == constants.HTTPPort:
 		port = ""
-	case scheme == "https" && port == "443":
+	case scheme == constants.SchemeHTTPS && port == constants.HTTPSPort:
 		port = ""
 	}
 
@@ -98,7 +82,7 @@ func normalizeQuery(values url.Values) string {
 		if strings.HasPrefix(lowerKey, "utm_") {
 			continue
 		}
-		if _, drop := droppedQueryParams[lowerKey]; drop {
+		if _, drop := constants.DroppedQueryParams[lowerKey]; drop {
 			continue
 		}
 		filtered := make([]string, 0, len(items))

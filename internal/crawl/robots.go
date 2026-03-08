@@ -5,13 +5,11 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"iris/internal/constants"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
-
-const defaultCrawlerUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 type RobotsClient struct {
 	fetcher   *CachedFetcher
@@ -35,18 +33,18 @@ type robotsRule struct {
 
 func NewRobotsClient(client *http.Client, userAgent string) *RobotsClient {
 	return NewRobotsClientWithOptions(client, userAgent, FetcherOptions{
-		DefaultTTL:      24 * time.Hour,
-		HostConcurrency: 2,
+		DefaultTTL:      constants.DefaultTTL24h,
+		HostConcurrency: constants.DefaultHostConcurrency,
 	})
 }
 
 func NewRobotsClientWithOptions(client *http.Client, userAgent string, options FetcherOptions) *RobotsClient {
 	userAgent = strings.TrimSpace(strings.ToLower(userAgent))
 	if userAgent == "" {
-		userAgent = defaultCrawlerUserAgent
+		userAgent = constants.DefaultCrawlerUserAgent
 	}
 	if options.DefaultTTL <= 0 {
-		options.DefaultTTL = 24 * time.Hour
+		options.DefaultTTL = constants.DefaultTTL24h
 	}
 	return &RobotsClient{
 		fetcher:   NewCachedFetcher(client, userAgent, options),
@@ -72,7 +70,7 @@ func (c *RobotsClient) Allowed(ctx context.Context, rawURL string) (bool, error)
 
 func (c *RobotsClient) policyFor(ctx context.Context, target *url.URL) (robotsPolicy, error) {
 	origin := target.Scheme + "://" + target.Host
-	result, err := c.fetcher.Fetch(ctx, origin+"/robots.txt")
+	result, err := c.fetcher.Fetch(ctx, origin+constants.PathRobotsTxt)
 	if err != nil {
 		normalizedErr := strings.ToLower(err.Error())
 		if strings.Contains(normalizedErr, "status 404") || strings.Contains(normalizedErr, "status 410") {
@@ -168,7 +166,7 @@ func parseRobots(r io.Reader) (robotsPolicy, error) {
 		value = strings.TrimSpace(value)
 
 		switch key {
-		case "user-agent":
+		case constants.RobotsDirectiveUserAgent:
 			if sawRule {
 				flush()
 			}
@@ -178,7 +176,7 @@ func parseRobots(r io.Reader) (robotsPolicy, error) {
 			}
 			current.agents = append(current.agents, agent)
 			haveAgent = true
-		case "allow", "disallow":
+		case constants.RobotsDirectiveAllow, constants.RobotsDirectiveDisallow:
 			if !haveAgent {
 				continue
 			}
@@ -186,7 +184,7 @@ func parseRobots(r io.Reader) (robotsPolicy, error) {
 				continue
 			}
 			current.rules = append(current.rules, robotsRule{
-				allow:       key == "allow",
+				allow:       key == constants.RobotsDirectiveAllow,
 				pattern:     value,
 				specificity: ruleSpecificity(value),
 			})
@@ -201,7 +199,7 @@ func parseRobots(r io.Reader) (robotsPolicy, error) {
 }
 
 func stripRobotsComment(line string) string {
-	if index := strings.Index(line, "#"); index >= 0 {
+	if index := strings.Index(line, constants.PatternComment); index >= 0 {
 		line = line[:index]
 	}
 	return strings.TrimSpace(line)
@@ -212,7 +210,7 @@ func matchingAgentScore(agents []string, userAgent string) int {
 	best := 0
 	for _, agent := range agents {
 		switch {
-		case agent == "*":
+		case agent == constants.PatternWildcard:
 			if best == 0 {
 				best = 1
 			}
@@ -237,8 +235,8 @@ func robotsPathWithQuery(u *url.URL) string {
 }
 
 func ruleSpecificity(pattern string) int {
-	pattern = strings.ReplaceAll(pattern, "*", "")
-	pattern = strings.ReplaceAll(pattern, "$", "")
+	pattern = strings.ReplaceAll(pattern, constants.PatternWildcard, "")
+	pattern = strings.ReplaceAll(pattern, constants.PatternAnchor, "")
 	return len(pattern)
 }
 
@@ -247,8 +245,8 @@ func ruleMatchesPath(pattern, path string) bool {
 	if pattern == "" {
 		return false
 	}
-	anchored := strings.HasSuffix(pattern, "$")
-	pattern = strings.TrimSuffix(pattern, "$")
+	anchored := strings.HasSuffix(pattern, constants.PatternAnchor)
+	pattern = strings.TrimSuffix(pattern, constants.PatternAnchor)
 	return wildcardMatch(pattern, path, anchored)
 }
 
@@ -257,7 +255,7 @@ func wildcardMatch(pattern, value string, anchored bool) bool {
 		return value == ""
 	}
 
-	parts := strings.Split(pattern, "*")
+	parts := strings.Split(pattern, constants.PatternWildcard)
 	position := 0
 	for index, part := range parts {
 		if part == "" {
@@ -268,7 +266,7 @@ func wildcardMatch(pattern, value string, anchored bool) bool {
 			return false
 		}
 		found += position
-		if index == 0 && !strings.HasPrefix(pattern, "*") && found != 0 {
+		if index == 0 && !strings.HasPrefix(pattern, constants.PatternWildcard) && found != 0 {
 			return false
 		}
 		position = found + len(part)
@@ -278,7 +276,7 @@ func wildcardMatch(pattern, value string, anchored bool) bool {
 		last := parts[len(parts)-1]
 		return strings.HasSuffix(value, last)
 	}
-	if !strings.HasPrefix(pattern, "*") && parts[0] != "" && !strings.HasPrefix(value, parts[0]) {
+	if !strings.HasPrefix(pattern, constants.PatternWildcard) && parts[0] != "" && !strings.HasPrefix(value, parts[0]) {
 		return false
 	}
 	return true
