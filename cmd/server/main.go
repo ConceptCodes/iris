@@ -12,6 +12,7 @@ import (
 	"iris/config"
 	"iris/internal/api"
 	"iris/internal/clip"
+	"iris/internal/constants"
 	"iris/internal/search"
 	"iris/internal/store"
 )
@@ -56,9 +57,9 @@ func main() {
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,
 		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  constants.HTTPTimeout30s,
+		WriteTimeout: constants.HTTPTimeout60s,
+		IdleTimeout:  constants.HTTPTimeout120s,
 	}
 
 	go func() {
@@ -75,7 +76,7 @@ func main() {
 	<-ctx.Done()
 	slog.Info("shutting down")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), constants.ShutdownTimeout10s)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {

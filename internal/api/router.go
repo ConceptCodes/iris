@@ -4,9 +4,9 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"time"
 
 	"iris/internal/assets"
+	"iris/internal/constants"
 	"iris/internal/crawl"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
@@ -43,14 +43,14 @@ func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlSe
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(middleware.Timeout(constants.HTTPTimeout60s))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		AllowedMethods:   []string{constants.MethodGET, constants.MethodPOST, constants.MethodOPTIONS},
+		AllowedHeaders:   []string{"Accept", constants.HeaderAuthorization, constants.HeaderContentType, constants.HeaderXCSRFToken},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
-		MaxAge:           300,
+		MaxAge:           constants.CORSMaxAge,
 	}))
 
 	assetStore, assetDir := buildAssetStore(assetsCfg)
@@ -63,39 +63,39 @@ func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlSe
 	wh := web.NewHandlers(engine)
 
 	if adminAPIKey != "" {
-		r.With(requireAdminKey(adminAPIKey)).Post("/admin/sources", h.CreateSource)
-		r.With(requireAdminKey(adminAPIKey)).Post("/admin/sources/{id}/run", h.TriggerSourceRun)
-		r.With(requireAdminKey(adminAPIKey)).Post("/admin/index/local", h.EnqueueLocalIndex)
-		r.With(requireAdminKey(adminAPIKey)).Post("/admin/reindex", h.HandleReindex)
-		r.With(requireAdminKey(adminAPIKey)).Get("/admin/runs", h.ListRuns)
-		r.With(requireAdminKey(adminAPIKey)).Get("/admin/runs/{id}", h.GetRun)
-		r.With(requireAdminKey(adminAPIKey)).Get("/admin/metrics", h.Metrics)
+		r.With(requireAdminKey(adminAPIKey)).Post(constants.PathAdminSources, h.CreateSource)
+		r.With(requireAdminKey(adminAPIKey)).Post(constants.PathAdminSourceRun, h.TriggerSourceRun)
+		r.With(requireAdminKey(adminAPIKey)).Post(constants.PathAdminIndexLocal, h.EnqueueLocalIndex)
+		r.With(requireAdminKey(adminAPIKey)).Post(constants.PathAdminReindex, h.HandleReindex)
+		r.With(requireAdminKey(adminAPIKey)).Get(constants.PathAdminRuns, h.ListRuns)
+		r.With(requireAdminKey(adminAPIKey)).Get(constants.PathAdminRunDetail, h.GetRun)
+		r.With(requireAdminKey(adminAPIKey)).Get(constants.PathAdminMetrics, h.Metrics)
 	} else {
-		r.Post("/admin/sources", adminDisabled)
-		r.Post("/admin/sources/{id}/run", adminDisabled)
-		r.Post("/admin/index/local", adminDisabled)
-		r.Post("/admin/reindex", adminDisabled)
-		r.Get("/admin/runs", adminDisabled)
-		r.Get("/admin/runs/{id}", adminDisabled)
-		r.Get("/admin/metrics", adminDisabled)
+		r.Post(constants.PathAdminSources, adminDisabled)
+		r.Post(constants.PathAdminSourceRun, adminDisabled)
+		r.Post(constants.PathAdminIndexLocal, adminDisabled)
+		r.Post(constants.PathAdminReindex, adminDisabled)
+		r.Get(constants.PathAdminRuns, adminDisabled)
+		r.Get(constants.PathAdminRunDetail, adminDisabled)
+		r.Get(constants.PathAdminMetrics, adminDisabled)
 	}
 
-	r.Get("/health", h.Health)
+	r.Get(constants.PathHealth, h.Health)
 
-	r.Get("/", wh.LandingPage)
-	r.Get("/search", wh.SearchResults)
-	r.Get("/image/{id}", wh.ImageDetail)
-	r.Get("/image/{id}/related", wh.RelatedImages)
-	r.Post("/search/reverse", wh.ReverseImageSearch)
-	r.Post("/search/reverse/url", wh.ReverseImageSearchURL)
+	r.Get(constants.PathLanding, wh.LandingPage)
+	r.Get(constants.PathSearch, wh.SearchResults)
+	r.Get(constants.PathImage+"/{id}", wh.ImageDetail)
+	r.Get(constants.PathImageRelated, wh.RelatedImages)
+	r.Post(constants.PathSearchReverse, wh.ReverseImageSearch)
+	r.Post(constants.PathSearchReverseURL, wh.ReverseImageSearchURL)
 
-	r.Post("/index/url", h.IndexFromURL)
-	r.Post("/index/upload", h.IndexFromUpload)
-	r.Post("/search/text", h.SearchText)
-	r.Post("/search/image", h.SearchImage)
-	r.Post("/search/image/url", h.SearchImageURL)
+	r.Post(constants.PathIndexURL, h.IndexFromURL)
+	r.Post(constants.PathIndexUpload, h.IndexFromUpload)
+	r.Post(constants.PathSearchText, h.SearchText)
+	r.Post(constants.PathSearchImage, h.SearchImage)
+	r.Post(constants.PathSearchImageURL, h.SearchImageURL)
 	if assetDir != "" {
-		r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetDir))))
+		r.Handle(constants.PathAssets+"/*", http.StripPrefix(constants.PathAssets+"/", http.FileServer(http.Dir(assetDir))))
 	}
 
 	return r
@@ -133,10 +133,10 @@ func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, jobs.Store
 		err        error
 	)
 	switch jobBackend {
-	case "memory":
+	case constants.KeywordMemory:
 		jobStore = jobs.NewMemoryStore()
 		crawlStore = crawl.NewMemoryStore()
-	case "postgres":
+	case constants.KeywordPostgres:
 		jobStore, err = jobs.NewPostgresStore(context.Background(), jobStoreDSN)
 		if err != nil {
 			return nil, nil, nil, err
@@ -160,15 +160,15 @@ func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, jobs.Store
 func requireAdminKey(expected string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := r.Header.Get("X-Admin-Key")
+			key := r.Header.Get(constants.HeaderXAdminKey)
 			if key == "" {
-				auth := r.Header.Get("Authorization")
-				if strings.HasPrefix(auth, "Bearer ") {
-					key = strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+				auth := r.Header.Get(constants.HeaderAuthorization)
+				if strings.HasPrefix(auth, constants.BearerPrefix) {
+					key = strings.TrimSpace(strings.TrimPrefix(auth, constants.BearerPrefix))
 				}
 			}
 			if key != expected {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				http.Error(w, constants.MessageUnauthorized, http.StatusUnauthorized)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -177,5 +177,5 @@ func requireAdminKey(expected string) func(http.Handler) http.Handler {
 }
 
 func adminDisabled(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "admin api disabled", http.StatusServiceUnavailable)
+	http.Error(w, constants.MessageAdminAPIDisabled, http.StatusServiceUnavailable)
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"iris/internal/constants"
 	"iris/internal/crawl"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
@@ -14,8 +15,6 @@ import (
 	"iris/internal/search"
 	"iris/pkg/models"
 )
-
-const maxUploadSize = 20 << 20
 
 type Handler struct {
 	engine       search.Engine
@@ -42,14 +41,14 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, constants.MessageInvalidJSON)
 		return
 	}
 	if req.URL == "" {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
-		writeError(w, http.StatusBadRequest, "url is required")
+		writeError(w, http.StatusBadRequest, constants.MessageURLRequired)
 		return
 	}
 	id, err := h.indexer.IndexFromURL(r.Context(), req)
@@ -67,11 +66,11 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncIndexRequest()
 	}
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+	if err := r.ParseMultipartForm(constants.MaxImageSize); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
-		writeError(w, http.StatusBadRequest, "file too large or invalid form")
+		writeError(w, http.StatusBadRequest, constants.StatusMsgFileTooLarge)
 		return
 	}
 	file, header, err := r.FormFile("image")
@@ -79,7 +78,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
-		writeError(w, http.StatusBadRequest, "image file is required")
+		writeError(w, http.StatusBadRequest, constants.MessageImageRequired)
 		return
 	}
 	defer file.Close()
@@ -88,7 +87,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
-		writeError(w, http.StatusInternalServerError, "failed to read file")
+		writeError(w, http.StatusInternalServerError, constants.MsgFailedToReadFile)
 		return
 	}
 	filename := r.FormValue("filename")
@@ -101,8 +100,8 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	meta := make(map[string]string)
 	for key, values := range r.MultipartForm.Value {
-		if strings.HasPrefix(key, "meta_") {
-			meta[strings.TrimPrefix(key, "meta_")] = values[0]
+		if strings.HasPrefix(key, constants.PayloadFieldMetaPrefix) {
+			meta[strings.TrimPrefix(key, constants.PayloadFieldMetaPrefix)] = values[0]
 		}
 	}
 	id, err := h.indexer.IndexUploadedBytes(r.Context(), buf, filename, tags, meta)
@@ -155,7 +154,7 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncSearchRequest()
 	}
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+	if err := r.ParseMultipartForm(constants.MaxImageSize); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
@@ -237,7 +236,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateSource(w http.ResponseWriter, r *http.Request) {
 	if h.crawlService == nil {
-		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
+		writeError(w, http.StatusNotImplemented, constants.MessageCrawlServiceUnavailable)
 		return
 	}
 	var req models.CrawlSourceRequest
@@ -263,7 +262,7 @@ func (h *Handler) CreateSource(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) TriggerSourceRun(w http.ResponseWriter, r *http.Request) {
 	if h.crawlService == nil {
-		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
+		writeError(w, http.StatusNotImplemented, constants.MessageCrawlServiceUnavailable)
 		return
 	}
 	var req crawl.TriggerRunInput
@@ -302,7 +301,7 @@ func (h *Handler) EnqueueLocalIndex(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	run, err := h.crawlService.TriggerRun(r.Context(), source.ID, "manual")
+	run, err := h.crawlService.TriggerRun(r.Context(), source.ID, constants.TriggerManual)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -332,12 +331,12 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	if h.crawlService == nil {
-		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
+		writeError(w, http.StatusNotImplemented, constants.MessageCrawlServiceUnavailable)
 		return
 	}
 	run, err := h.crawlService.GetRun(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeError(w, http.StatusNotFound, constants.MessageNotFound)
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
@@ -353,24 +352,24 @@ func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleReindex(w http.ResponseWriter, r *http.Request) {
 	if h.jobStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "job store unavailable")
+		writeError(w, http.StatusServiceUnavailable, constants.MessageJobStoreUnavailable)
 		return
 	}
 	var req models.ReindexRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json")
+		writeError(w, http.StatusBadRequest, constants.MessageInvalidJSON)
 		return
 	}
 
 	filters := make(map[string]string)
 	if req.SourceID != "" {
-		filters["meta_source_id"] = req.SourceID
+		filters[constants.PayloadFieldMetaPrefix+constants.MetaKeySourceID] = req.SourceID
 	}
 	if req.RunID != "" {
-		filters["meta_run_id"] = req.RunID
+		filters[constants.PayloadFieldMetaPrefix+constants.MetaKeyRunID] = req.RunID
 	}
 
-	limit := uint32(100)
+	limit := uint32(constants.DefaultLimit100)
 	if req.Limit > 0 {
 		limit = uint32(req.Limit)
 	}
@@ -390,9 +389,9 @@ func (h *Handler) HandleReindex(w http.ResponseWriter, r *http.Request) {
 	for _, image := range images {
 		sourceURL := image.URL
 		if image.Meta != nil {
-			if s := image.Meta["origin_url"]; s != "" {
+			if s := image.Meta[constants.MetaKeyOriginURL]; s != "" {
 				sourceURL = s
-			} else if s := image.Meta["source_url"]; s != "" {
+			} else if s := image.Meta[constants.MetaKeySourceURL]; s != "" {
 				sourceURL = s
 			}
 		}
