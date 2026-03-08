@@ -47,7 +47,7 @@ func TestMemoryStoreFailureRetriesThenDeadLetters(t *testing.T) {
 		if !ok || leased.ID != job.ID {
 			t.Fatalf("expected job lease on attempt %d", attempt+1)
 		}
-		if err := store.MarkFailed(context.Background(), job.ID, assertErr("boom"), time.Now()); err != nil {
+		if _, err := store.MarkFailed(context.Background(), job.ID, assertErr("boom"), time.Now()); err != nil {
 			t.Fatalf("mark failed: %v", err)
 		}
 	}

@@ -55,23 +55,29 @@ func (s *PostgresStore) Enqueue(ctx context.Context, job Job) (Job, error) {
 
 	const query = `
 		INSERT INTO jobs (
-			id, type, status, payload_json, attempts, max_attempts,
+			id, type, status, dedup_key, payload_json, attempts, max_attempts,
 			available_at, leased_until, last_error, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4, 0, $5, $6, NULL, '', $7, $7)
+		VALUES ($1, $2, $3, $4, $5, 0, $6, $7, NULL, '', $8, $8)
+		ON CONFLICT (dedup_key) WHERE dedup_key <> '' DO NOTHING
 	`
-	if _, err := s.db.ExecContext(
+	result, err := s.db.ExecContext(
 		ctx,
 		query,
 		job.ID,
 		string(job.Type),
 		string(job.Status),
+		job.DedupKey,
 		[]byte(job.PayloadJSON),
 		job.MaxAttempts,
 		job.AvailableAt,
 		now,
-	); err != nil {
+	)
+	if err != nil {
 		return Job{}, fmt.Errorf("enqueue job: %w", err)
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows == 0 && job.DedupKey != "" {
+		return job, nil
 	}
 
 	job.Attempts = 0
@@ -140,11 +146,11 @@ func (s *PostgresStore) MarkSucceeded(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *PostgresStore) MarkFailed(ctx context.Context, id string, failure error, retryAt time.Time) error {
+func (s *PostgresStore) MarkFailed(ctx context.Context, id string, failure error, retryAt time.Time) (Status, error) {
 	const selectQuery = `SELECT attempts, max_attempts FROM jobs WHERE id = $1`
 	var attempts, maxAttempts int
 	if err := s.db.QueryRowContext(ctx, selectQuery, id).Scan(&attempts, &maxAttempts); err != nil {
-		return fmt.Errorf("select failed job: %w", err)
+		return "", fmt.Errorf("select failed job: %w", err)
 	}
 
 	status := StatusPending
@@ -164,9 +170,9 @@ func (s *PostgresStore) MarkFailed(ctx context.Context, id string, failure error
 		time.Now().UTC(),
 	)
 	if err != nil {
-		return fmt.Errorf("mark failed: %w", err)
+		return "", fmt.Errorf("mark failed: %w", err)
 	}
-	return nil
+	return status, nil
 }
 
 func (s *PostgresStore) Close() error {
@@ -188,6 +194,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			id TEXT PRIMARY KEY,
 			type TEXT NOT NULL,
 			status TEXT NOT NULL,
+			dedup_key TEXT NOT NULL DEFAULT '',
 			payload_json JSONB NOT NULL,
 			attempts INTEGER NOT NULL DEFAULT 0,
 			max_attempts INTEGER NOT NULL DEFAULT 5,
@@ -199,6 +206,9 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		);
 		CREATE INDEX IF NOT EXISTS jobs_lease_idx
 		ON jobs (status, available_at, leased_until, type);
+		CREATE UNIQUE INDEX IF NOT EXISTS jobs_dedup_idx
+		ON jobs (dedup_key)
+		WHERE dedup_key <> '';
 	`
 	if _, err := s.db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("ensure jobs schema: %w", err)
@@ -208,7 +218,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 
 func buildLeaseQuery(now time.Time, allowedTypes []Type) (string, []any) {
 	base := `
-		SELECT id, type, status, payload_json, attempts, max_attempts,
+		SELECT id, type, status, dedup_key, payload_json, attempts, max_attempts,
 		       available_at, leased_until, last_error, created_at, updated_at
 		FROM jobs
 		WHERE status = $1
@@ -237,6 +247,7 @@ func scanJob(row scanner, job *Job) error {
 		&job.ID,
 		&jobType,
 		&status,
+		&job.DedupKey,
 		&job.PayloadJSON,
 		&job.Attempts,
 		&job.MaxAttempts,

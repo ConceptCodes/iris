@@ -38,6 +38,13 @@ func (s *MemoryStore) Enqueue(ctx context.Context, job Job) (Job, error) {
 	if job.AvailableAt.IsZero() {
 		job.AvailableAt = now
 	}
+	if job.DedupKey != "" {
+		for _, existing := range s.jobs {
+			if existing.DedupKey == job.DedupKey && existing.Status != StatusDeadLetter {
+				return existing, nil
+			}
+		}
+	}
 	job.CreatedAt = now
 	job.UpdatedAt = now
 
@@ -86,7 +93,7 @@ func (s *MemoryStore) MarkSucceeded(ctx context.Context, id string) error {
 	return fmt.Errorf("job not found: %s", id)
 }
 
-func (s *MemoryStore) MarkFailed(ctx context.Context, id string, err error, retryAt time.Time) error {
+func (s *MemoryStore) MarkFailed(ctx context.Context, id string, err error, retryAt time.Time) (Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -104,9 +111,9 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, id string, err error, retr
 			job.AvailableAt = retryAt
 		}
 		s.jobs[index] = job
-		return nil
+		return job.Status, nil
 	}
-	return fmt.Errorf("job not found: %s", id)
+	return "", fmt.Errorf("job not found: %s", id)
 }
 
 func (s *MemoryStore) Close() error {

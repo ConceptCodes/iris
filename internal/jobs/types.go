@@ -30,6 +30,7 @@ type Job struct {
 	ID          string
 	Type        Type
 	Status      Status
+	DedupKey    string
 	PayloadJSON json.RawMessage
 	Attempts    int
 	MaxAttempts int
@@ -44,7 +45,7 @@ type Store interface {
 	Enqueue(ctx context.Context, job Job) (Job, error)
 	LeaseNext(ctx context.Context, now time.Time, leaseDuration time.Duration, allowedTypes ...Type) (Job, bool, error)
 	MarkSucceeded(ctx context.Context, id string) error
-	MarkFailed(ctx context.Context, id string, err error, retryAt time.Time) error
+	MarkFailed(ctx context.Context, id string, err error, retryAt time.Time) (Status, error)
 	Close() error
 }
 
@@ -53,10 +54,12 @@ type FetchImagePayload struct {
 	Filename string            `json:"filename,omitempty"`
 	Tags     []string          `json:"tags,omitempty"`
 	Meta     map[string]string `json:"meta,omitempty"`
+	RunID    string            `json:"run_id,omitempty"`
 }
 
 type IndexLocalFilePayload struct {
-	Path string `json:"path"`
+	Path  string `json:"path"`
+	RunID string `json:"run_id,omitempty"`
 }
 
 type DiscoverSourcePayload struct {
