@@ -8,7 +8,7 @@ package templates
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/davidojo/google-images/pkg/models"
+import "iris/pkg/models"
 import "strconv"
 
 func ImageCard(result models.SearchResult, index int) templ.Component {
