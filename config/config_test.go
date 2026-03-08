@@ -193,3 +193,56 @@ func TestLoadWorkerDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("unexpected cache prune batch: %d", cfg.CachePruneBatch)
 	}
 }
+
+func TestLoadWorkerNewFieldsDefaults(t *testing.T) {
+	// Clear any env vars that might be set
+	t.Setenv("MAX_IMAGE_BYTES", "")
+	t.Setenv("FETCH_TIMEOUT", "")
+	t.Setenv("USER_AGENT", "")
+	t.Setenv("CRAWL_MAX_DEPTH", "")
+	t.Setenv("CRAWL_RPS", "")
+
+	cfg := LoadWorker()
+
+	if cfg.MaxImageBytes != defaultMaxImageBytes {
+		t.Fatalf("expected default max image bytes %d, got %d", defaultMaxImageBytes, cfg.MaxImageBytes)
+	}
+	if cfg.FetchTimeout != defaultFetchTimeout {
+		t.Fatalf("expected default fetch timeout %s, got %s", defaultFetchTimeout, cfg.FetchTimeout)
+	}
+	if cfg.UserAgent != defaultUserAgent {
+		t.Fatalf("expected default user agent %q, got %q", defaultUserAgent, cfg.UserAgent)
+	}
+	if cfg.CrawlMaxDepth != defaultCrawlMaxDepth {
+		t.Fatalf("expected default crawl max depth %d, got %d", defaultCrawlMaxDepth, cfg.CrawlMaxDepth)
+	}
+	if cfg.CrawlRPS != defaultCrawlRPS {
+		t.Fatalf("expected default crawl rps %d, got %d", defaultCrawlRPS, cfg.CrawlRPS)
+	}
+}
+
+func TestLoadWorkerNewFieldsOverrides(t *testing.T) {
+	t.Setenv("MAX_IMAGE_BYTES", "10485760") // 10MB
+	t.Setenv("FETCH_TIMEOUT", "60s")
+	t.Setenv("USER_AGENT", "test-agent/1.0")
+	t.Setenv("CRAWL_MAX_DEPTH", "5")
+	t.Setenv("CRAWL_RPS", "10")
+
+	cfg := LoadWorker()
+
+	if cfg.MaxImageBytes != 10485760 {
+		t.Fatalf("expected max image bytes 10485760, got %d", cfg.MaxImageBytes)
+	}
+	if cfg.FetchTimeout != 60*time.Second {
+		t.Fatalf("expected fetch timeout 60s, got %s", cfg.FetchTimeout)
+	}
+	if cfg.UserAgent != "test-agent/1.0" {
+		t.Fatalf("expected user agent 'test-agent/1.0', got %q", cfg.UserAgent)
+	}
+	if cfg.CrawlMaxDepth != 5 {
+		t.Fatalf("expected crawl max depth 5, got %d", cfg.CrawlMaxDepth)
+	}
+	if cfg.CrawlRPS != 10 {
+		t.Fatalf("expected crawl rps 10, got %d", cfg.CrawlRPS)
+	}
+}

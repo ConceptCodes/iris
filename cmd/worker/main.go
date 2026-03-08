@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,6 +28,83 @@ import (
 	"iris/internal/store"
 	"iris/pkg/models"
 )
+
+// errorType indicates whether an error is transient (retryable) or permanent (non-retryable)
+type errorType int
+
+const (
+	errorTypeTransient errorType = iota
+	errorTypePermanent
+)
+
+// classifyError determines if an error is transient or permanent based on its nature.
+// Transient errors: network timeouts, temporary failures, rate limits (429, 502, 503, 504), context deadlines
+// Permanent errors: not found (404), bad request (400), authentication failures (401, 403), validation errors
+func classifyError(err error) errorType {
+	if err == nil {
+		return errorTypeTransient
+	}
+
+	// Check for HTTP status code errors
+	var httpErr interface{ StatusCode() int }
+	if errors.As(err, &httpErr) {
+		switch httpErr.StatusCode() {
+		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			// 400, 401, 403, 404 are permanent errors
+			return errorTypePermanent
+		case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			// 429, 502, 503, 504 are transient errors
+			return errorTypeTransient
+		}
+	}
+
+	// Check for context errors (timeout, cancellation)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return errorTypeTransient
+	}
+
+	// Check for network-related errors
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return errorTypeTransient
+	}
+
+	// Check for specific error messages that indicate permanent failures
+	errMsg := strings.ToLower(err.Error())
+	if strings.Contains(errMsg, "unsupported content type") ||
+		strings.Contains(errMsg, "image exceeds") ||
+		strings.Contains(errMsg, "not found") ||
+		strings.Contains(errMsg, "invalid") ||
+		strings.Contains(errMsg, "is required") {
+		return errorTypePermanent
+	}
+
+	// Default to transient for unknown errors to allow retry
+	return errorTypeTransient
+}
+
+// calculateRetryBackoff implements exponential backoff with jitter to avoid thundering herd.
+// Formula: baseDelay * (2 ^ (attempt - 1)) + random jitter [0, baseDelay * 0.5)
+// Capped at a reasonable maximum (5 minutes).
+func calculateRetryBackoff(attempt int, baseDelay time.Duration) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+
+	// Exponential backoff: baseDelay * (2 ^ (attempt - 1))
+	backoff := baseDelay * time.Duration(1<<(attempt-1))
+
+	// Add jitter: random value from [0, baseDelay * 0.5) to distribute retries
+	jitter := time.Duration(rand.Int63n(int64(baseDelay / 2)))
+	backoff += jitter
+
+	// Cap at maximum delay (5 minutes)
+	maxDelay := 5 * time.Minute
+	if backoff > maxDelay {
+		backoff = maxDelay
+	}
+
+	return backoff
+}
 
 type crawlerRuntime struct {
 	fetcher    *crawl.CachedFetcher
@@ -150,12 +229,21 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 
 		if err := handleIndexerJob(ctx, pipeline, job); err != nil {
 			slog.Error("job failed", "job_id", job.ID, "type", job.Type, "error", err)
-			retryAt := time.Now().UTC().Add(cfg.JobPollInterval)
-			status, markErr := jobStore.MarkFailed(ctx, job.ID, err, retryAt)
+
+			// Classify error and calculate appropriate retry backoff
+			errType := classifyError(err)
+			retryAt := time.Now().UTC().Add(calculateRetryBackoff(job.Attempts+1, cfg.JobPollInterval))
+
+			// Permanent failures go to dead letter queue, transient failures are retried with backoff
+			if errType == errorTypePermanent {
+				retryAt = time.Time{} // No retry for permanent errors
+			}
+
+			markStatus, markErr := jobStore.MarkFailed(ctx, job.ID, err, retryAt)
 			if markErr != nil {
 				return markErr
 			}
-			if status == jobs.StatusDeadLetter {
+			if markStatus == jobs.StatusDeadLetter {
 				_ = incrementRunFailedForJob(ctx, crawlStore, job, err)
 			}
 			continue
@@ -202,7 +290,17 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 
 		if err := handleCrawlerJob(ctx, cfg, runtime, jobStore, crawlStore, job); err != nil {
 			slog.Error("crawler job failed", "job_id", job.ID, "error", err)
-			if _, markErr := jobStore.MarkFailed(ctx, job.ID, err, time.Now().UTC().Add(cfg.JobPollInterval)); markErr != nil {
+
+			// Classify error and calculate appropriate retry backoff
+			errType := classifyError(err)
+			retryAt := time.Now().UTC().Add(calculateRetryBackoff(job.Attempts+1, cfg.JobPollInterval))
+
+			// Permanent failures go to dead letter queue, transient failures are retried with backoff
+			if errType == errorTypePermanent {
+				retryAt = time.Time{} // No retry for permanent errors
+			}
+
+			if _, markErr := jobStore.MarkFailed(ctx, job.ID, err, retryAt); markErr != nil {
 				return markErr
 			}
 			continue
@@ -256,11 +354,30 @@ func handleIndexerJob(ctx context.Context, pipeline *indexing.Pipeline, job jobs
 		if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
 			return err
 		}
+		meta := make(map[string]string)
+		for k, v := range payload.Meta {
+			meta[k] = v
+		}
+		if payload.PageURL != "" {
+			meta["page_url"] = payload.PageURL
+		}
+		if payload.Title != "" {
+			meta["title"] = payload.Title
+		}
+		if payload.CrawlSourceID != "" {
+			meta["crawl_source_id"] = payload.CrawlSourceID
+		}
+		if payload.SourceDomain != "" {
+			meta["source_domain"] = payload.SourceDomain
+		}
+		if payload.MimeType != "" {
+			meta["mime_type"] = payload.MimeType
+		}
 		_, err := pipeline.IndexFromURL(ctx, models.IndexRequest{
 			URL:      payload.URL,
 			Filename: payload.Filename,
 			Tags:     payload.Tags,
-			Meta:     payload.Meta,
+			Meta:     meta,
 		})
 		return err
 	case jobs.TypeIndexLocalFile:
@@ -577,7 +694,11 @@ func discoverDomainSource(ctx context.Context, cfg config.Worker, runtime *crawl
 				continue
 			}
 			seenImages[imageURL] = struct{}{}
-			if err := enqueueFetchImage(ctx, jobStore, imageURL, runID); err != nil {
+			pageURL := result.URL
+			if discovery.CanonicalURL != "" {
+				pageURL = discovery.CanonicalURL
+			}
+			if err := enqueueFetchImage(ctx, jobStore, imageURL, runID, pageURL, discovery.Title, source.ID); err != nil {
 				return discovered, err
 			}
 			discovered++
@@ -631,7 +752,7 @@ func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *craw
 				continue
 			}
 			seenImages[normalizedLoc] = struct{}{}
-			if err := enqueueFetchImage(ctx, jobStore, normalizedLoc, runID); err != nil {
+			if err := enqueueFetchImage(ctx, jobStore, normalizedLoc, runID, "", "", source.ID); err != nil {
 				return discovered, err
 			}
 			discovered++
@@ -669,7 +790,11 @@ func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *craw
 				continue
 			}
 			seenImages[imageURL] = struct{}{}
-			if err := enqueueFetchImage(ctx, jobStore, imageURL, runID); err != nil {
+			pageURL := result.URL
+			if discovery.CanonicalURL != "" {
+				pageURL = discovery.CanonicalURL
+			}
+			if err := enqueueFetchImage(ctx, jobStore, imageURL, runID, pageURL, discovery.Title, source.ID); err != nil {
 				return discovered, err
 			}
 			discovered++
@@ -678,12 +803,18 @@ func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *craw
 	return discovered, nil
 }
 
-func enqueueFetchImage(ctx context.Context, jobStore jobs.Store, imageURL, runID string) error {
+func enqueueFetchImage(ctx context.Context, jobStore jobs.Store, imageURL, runID string, pageURL, title, sourceID string) error {
 	normalizedURL, err := crawl.NormalizeURL(imageURL)
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(jobs.FetchImagePayload{URL: normalizedURL, RunID: runID})
+	payload, err := json.Marshal(jobs.FetchImagePayload{
+		URL:           normalizedURL,
+		RunID:         runID,
+		PageURL:       pageURL,
+		Title:         title,
+		CrawlSourceID: sourceID,
+	})
 	if err != nil {
 		return err
 	}

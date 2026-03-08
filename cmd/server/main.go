@@ -33,7 +33,7 @@ func main() {
 	}
 
 	engine := search.NewEngine(clipClient, qdrantStore)
-	crawlService, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN)
+	crawlService, jobStore, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN)
 	if err != nil {
 		slog.Error("failed to initialize crawl service", "error", err)
 	} else if cleanup != nil {
@@ -51,7 +51,7 @@ func main() {
 		Prefix:     cfg.AssetPrefix,
 		PublicBase: cfg.AssetPublicBase,
 		PathStyle:  cfg.AssetPathStyle,
-	}, crawlService, cfg.AdminAPIKey)
+	}, crawlService, cfg.AdminAPIKey, jobStore)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,

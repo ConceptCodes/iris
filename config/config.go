@@ -26,6 +26,11 @@ const (
 	defaultFetchRetries    = 2
 	defaultHostConcurrency = 2
 	defaultCachePruneBatch = 500
+	defaultMaxImageBytes   = 20 << 20
+	defaultFetchTimeout    = 30 * time.Second
+	defaultUserAgent       = "iris/1.0"
+	defaultCrawlMaxDepth   = 1
+	defaultCrawlRPS        = 0
 )
 
 const (
@@ -78,6 +83,11 @@ type Worker struct {
 	RobotsCacheTTL       time.Duration
 	CachePruneInterval   time.Duration
 	CachePruneBatch      int
+	MaxImageBytes        int           // Maximum size of image files to fetch, in bytes
+	FetchTimeout         time.Duration // Timeout for HTTP fetch requests
+	UserAgent            string        // User-Agent header for HTTP requests
+	CrawlMaxDepth        int           // Default maximum crawl depth for sources without explicit MaxDepth
+	CrawlRPS             int           // Default crawl requests per second for sources without explicit RateLimitRPS
 }
 
 func LoadServer() Server {
@@ -160,6 +170,26 @@ func LoadWorker() Worker {
 		CachePruneBatch: getEnvInt(
 			"CACHE_PRUNE_BATCH",
 			defaultCachePruneBatch,
+		),
+		MaxImageBytes: getEnvInt(
+			"MAX_IMAGE_BYTES",
+			defaultMaxImageBytes,
+		),
+		FetchTimeout: getEnvDuration(
+			"FETCH_TIMEOUT",
+			defaultFetchTimeout,
+		),
+		UserAgent: getEnv(
+			"USER_AGENT",
+			defaultUserAgent,
+		),
+		CrawlMaxDepth: getEnvInt(
+			"CRAWL_MAX_DEPTH",
+			defaultCrawlMaxDepth,
+		),
+		CrawlRPS: getEnvInt(
+			"CRAWL_RPS",
+			defaultCrawlRPS,
 		),
 	}
 }
