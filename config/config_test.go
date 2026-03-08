@@ -11,6 +11,8 @@ func TestLoadServerDefaults(t *testing.T) {
 	t.Setenv("CLIP_DIM", "")
 	t.Setenv("HTTP_ADDR", "")
 	t.Setenv("ASSET_DIR", "")
+	t.Setenv("JOB_BACKEND", "")
+	t.Setenv("JOB_STORE_DSN", "")
 
 	cfg := LoadServer()
 
@@ -28,6 +30,12 @@ func TestLoadServerDefaults(t *testing.T) {
 	}
 	if cfg.AssetDir != defaultAssetDir {
 		t.Fatalf("expected default asset dir, got %q", cfg.AssetDir)
+	}
+	if cfg.JobBackend != defaultJobBackend {
+		t.Fatalf("expected default job backend, got %q", cfg.JobBackend)
+	}
+	if cfg.JobStoreDSN != defaultJobStoreDSN {
+		t.Fatalf("expected default job store dsn, got %q", cfg.JobStoreDSN)
 	}
 }
 

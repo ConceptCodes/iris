@@ -3,11 +3,15 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"iris/internal/crawl"
+	"iris/internal/jobs"
 )
 
 func TestRouterHealth(t *testing.T) {
-	router := NewRouter(nil, t.TempDir())
+	router := NewRouter(nil, t.TempDir(), nil)
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -21,7 +25,7 @@ func TestRouterHealth(t *testing.T) {
 }
 
 func TestRouterLanding(t *testing.T) {
-	router := NewRouter(nil, t.TempDir())
+	router := NewRouter(nil, t.TempDir(), nil)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -35,7 +39,7 @@ func TestRouterLanding(t *testing.T) {
 }
 
 func TestRouterEndpoints(t *testing.T) {
-	router := NewRouter(&mockSearchEngine{}, t.TempDir())
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil)
 
 	tests := []struct {
 		method string
@@ -58,7 +62,7 @@ func TestRouterEndpoints(t *testing.T) {
 }
 
 func TestRouterMethodEnforcement(t *testing.T) {
-	router := NewRouter(&mockSearchEngine{}, t.TempDir())
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil)
 	req := httptest.NewRequest("POST", "/health", nil) // health is GET
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -68,7 +72,7 @@ func TestRouterMethodEnforcement(t *testing.T) {
 }
 
 func TestRouterMiddleware(t *testing.T) {
-	router := NewRouter(&mockSearchEngine{}, t.TempDir())
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil)
 
 	// CORS preflight
 	req := httptest.NewRequest("OPTIONS", "/search/text", nil)
@@ -91,5 +95,19 @@ func TestRouterMiddleware(t *testing.T) {
 	router.ServeHTTP(w2, req2)
 	if w2.Result().StatusCode != http.StatusOK {
 		t.Errorf("health endpoint failed under middleware")
+	}
+}
+
+func TestRouterAdminEndpoints(t *testing.T) {
+	crawlService := crawl.NewService(crawl.NewMemoryStore(), jobs.NewMemoryStore())
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), crawlService)
+
+	req := httptest.NewRequest("POST", "/admin/sources", strings.NewReader(`{"kind":"local_dir","local_path":"./images"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 creating source, got %d", w.Result().StatusCode)
 	}
 }

@@ -32,7 +32,9 @@ type Shared struct {
 
 type Server struct {
 	Shared
-	HTTPAddr string
+	HTTPAddr    string
+	JobBackend  string
+	JobStoreDSN string
 }
 
 type Indexer struct {
@@ -55,6 +57,14 @@ func LoadServer() Server {
 		HTTPAddr: getEnv(
 			"HTTP_ADDR",
 			defaultHTTPAddr,
+		),
+		JobBackend: getEnv(
+			"JOB_BACKEND",
+			defaultJobBackend,
+		),
+		JobStoreDSN: getEnv(
+			"JOB_STORE_DSN",
+			defaultJobStoreDSN,
 		),
 	}
 }

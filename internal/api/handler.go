@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"iris/internal/crawl"
 	"iris/internal/indexing"
 	"iris/internal/search"
 	"iris/pkg/models"
@@ -14,12 +15,13 @@ import (
 const maxUploadSize = 20 << 20
 
 type Handler struct {
-	engine  search.Engine
-	indexer *indexing.Pipeline
+	engine       search.Engine
+	indexer      *indexing.Pipeline
+	crawlService *crawl.Service
 }
 
-func NewHandler(engine search.Engine, indexer *indexing.Pipeline) *Handler {
-	return &Handler{engine: engine, indexer: indexer}
+func NewHandler(engine search.Engine, indexer *indexing.Pipeline, crawlService *crawl.Service) *Handler {
+	return &Handler{engine: engine, indexer: indexer, crawlService: crawlService}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +162,72 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 		Query:   req.URL,
 		TookMs:  time.Since(start).Milliseconds(),
 	})
+}
+
+func (h *Handler) CreateSource(w http.ResponseWriter, r *http.Request) {
+	if h.crawlService == nil {
+		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
+		return
+	}
+	var req models.CrawlSourceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	source, err := h.crawlService.CreateSource(r.Context(), crawl.CreateSourceInput{
+		Kind:           crawl.SourceKind(req.Kind),
+		SeedURL:        req.SeedURL,
+		LocalPath:      req.LocalPath,
+		MaxDepth:       req.MaxDepth,
+		RateLimitRPS:   req.RateLimitRPS,
+		AllowedDomains: req.AllowedDomains,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, models.CrawlSourceResponse{ID: source.ID, Status: string(source.Status)})
+}
+
+func (h *Handler) TriggerSourceRun(w http.ResponseWriter, r *http.Request) {
+	if h.crawlService == nil {
+		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
+		return
+	}
+	var req crawl.TriggerRunInput
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	run, err := h.crawlService.TriggerRun(r.Context(), r.PathValue("id"), req.Trigger)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, models.TriggerRunResponse{RunID: run.ID, Status: string(run.Status)})
+}
+
+func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
+	if h.crawlService == nil {
+		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
+		return
+	}
+	runs, err := h.crawlService.ListRuns(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
+	if h.crawlService == nil {
+		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
+		return
+	}
+	run, err := h.crawlService.GetRun(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

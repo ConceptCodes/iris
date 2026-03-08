@@ -33,7 +33,13 @@ func main() {
 	}
 
 	engine := search.NewEngine(clipClient, qdrantStore)
-	router := api.NewRouter(engine, cfg.AssetDir)
+	crawlService, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN)
+	if err != nil {
+		slog.Error("failed to initialize crawl service", "error", err)
+	} else if cleanup != nil {
+		defer cleanup()
+	}
+	router := api.NewRouter(engine, cfg.AssetDir, crawlService)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,
