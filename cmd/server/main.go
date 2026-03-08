@@ -55,7 +55,7 @@ func main() {
 	} else if cleanup != nil {
 		defer cleanup()
 	}
-	router := api.NewRouterWithAssets(engine, api.AssetsSettings{
+	router := api.NewRouterWithAssetsAndAuth(engine, api.AssetsSettings{
 		Backend:    cfg.AssetBackend,
 		LocalDir:   cfg.AssetDir,
 		Bucket:     cfg.AssetBucket,
@@ -67,7 +67,10 @@ func main() {
 		Prefix:     cfg.AssetPrefix,
 		PublicBase: cfg.AssetPublicBase,
 		PathStyle:  cfg.AssetPathStyle,
-	}, crawlService, cfg.AdminAPIKey, jobStore)
+	}, crawlService, api.AdminAuthSettings{
+		AdminAPIKey:     cfg.AdminAPIKey,
+		ReadOnlyAPIKeys: cfg.AdminReadOnlyAPIKeys,
+	}, jobStore)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,

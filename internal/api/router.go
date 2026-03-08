@@ -34,11 +34,27 @@ type AssetsSettings struct {
 	PathStyle  bool
 }
 
+type AdminAuthSettings struct {
+	AdminAPIKey     string
+	ReadOnlyAPIKeys []string
+}
+
+type adminRole int
+
+const (
+	adminRoleRead adminRole = iota
+	adminRoleWrite
+)
+
 func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Service, adminAPIKey string) http.Handler {
 	return NewRouterWithAssets(engine, AssetsSettings{LocalDir: assetDir}, crawlService, adminAPIKey, nil)
 }
 
 func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlService *crawl.Service, adminAPIKey string, jobStore jobs.Store) http.Handler {
+	return NewRouterWithAssetsAndAuth(engine, assetsCfg, crawlService, AdminAuthSettings{AdminAPIKey: adminAPIKey}, jobStore)
+}
+
+func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, crawlService *crawl.Service, authSettings AdminAuthSettings, jobStore jobs.Store) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -65,14 +81,15 @@ func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlSe
 	h := NewHandler(engine, indexer, crawlService, jobStore, counters)
 	wh := web.NewHandlers(engine)
 
-	if adminAPIKey != "" {
-		r.With(requireAdminKey(adminAPIKey)).Post(constants.PathAdminSources, h.CreateSource)
-		r.With(requireAdminKey(adminAPIKey)).Post(constants.PathAdminSourceRun, h.TriggerSourceRun)
-		r.With(requireAdminKey(adminAPIKey)).Post(constants.PathAdminIndexLocal, h.EnqueueLocalIndex)
-		r.With(requireAdminKey(adminAPIKey)).Post(constants.PathAdminReindex, h.HandleReindex)
-		r.With(requireAdminKey(adminAPIKey)).Get(constants.PathAdminRuns, h.ListRuns)
-		r.With(requireAdminKey(adminAPIKey)).Get(constants.PathAdminRunDetail, h.GetRun)
-		r.With(requireAdminKey(adminAPIKey)).Get(constants.PathAdminMetrics, h.Metrics)
+	authorizer := newAdminAuthorizer(authSettings)
+	if authorizer.enabled() {
+		r.With(authorizer.requireRole(adminRoleWrite)).Post(constants.PathAdminSources, h.CreateSource)
+		r.With(authorizer.requireRole(adminRoleWrite)).Post(constants.PathAdminSourceRun, h.TriggerSourceRun)
+		r.With(authorizer.requireRole(adminRoleWrite)).Post(constants.PathAdminIndexLocal, h.EnqueueLocalIndex)
+		r.With(authorizer.requireRole(adminRoleWrite)).Post(constants.PathAdminReindex, h.HandleReindex)
+		r.With(authorizer.requireRole(adminRoleRead)).Get(constants.PathAdminRuns, h.ListRuns)
+		r.With(authorizer.requireRole(adminRoleRead)).Get(constants.PathAdminRunDetail, h.GetRun)
+		r.With(authorizer.requireRole(adminRoleRead)).Get(constants.PathAdminMetrics, h.Metrics)
 	} else {
 		r.Post(constants.PathAdminSources, adminDisabled)
 		r.Post(constants.PathAdminSourceRun, adminDisabled)
@@ -161,23 +178,71 @@ func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, jobs.Store
 	return crawl.NewService(crawlStore, jobStore), jobStore, cleanup, nil
 }
 
-func requireAdminKey(expected string) func(http.Handler) http.Handler {
+type adminAuthorizer struct {
+	adminKeys    map[string]struct{}
+	readOnlyKeys map[string]struct{}
+}
+
+func newAdminAuthorizer(settings AdminAuthSettings) adminAuthorizer {
+	authz := adminAuthorizer{
+		adminKeys:    make(map[string]struct{}),
+		readOnlyKeys: make(map[string]struct{}),
+	}
+	if settings.AdminAPIKey != "" {
+		authz.adminKeys[settings.AdminAPIKey] = struct{}{}
+	}
+	for _, key := range settings.ReadOnlyAPIKeys {
+		if key != "" {
+			authz.readOnlyKeys[key] = struct{}{}
+		}
+	}
+	return authz
+}
+
+func (a adminAuthorizer) enabled() bool {
+	return len(a.adminKeys) > 0 || len(a.readOnlyKeys) > 0
+}
+
+func (a adminAuthorizer) requireRole(required adminRole) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := r.Header.Get(constants.HeaderXAdminKey)
-			if key == "" {
-				auth := r.Header.Get(constants.HeaderAuthorization)
-				if strings.HasPrefix(auth, constants.BearerPrefix) {
-					key = strings.TrimSpace(strings.TrimPrefix(auth, constants.BearerPrefix))
-				}
-			}
-			if key != expected {
+			role, ok := a.roleForToken(adminTokenFromRequest(r))
+			if !ok {
 				http.Error(w, constants.MessageUnauthorized, http.StatusUnauthorized)
+				return
+			}
+			if required == adminRoleWrite && role != adminRoleWrite {
+				http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func (a adminAuthorizer) roleForToken(token string) (adminRole, bool) {
+	if token == "" {
+		return adminRoleRead, false
+	}
+	if _, ok := a.adminKeys[token]; ok {
+		return adminRoleWrite, true
+	}
+	if _, ok := a.readOnlyKeys[token]; ok {
+		return adminRoleRead, true
+	}
+	return adminRoleRead, false
+}
+
+func adminTokenFromRequest(r *http.Request) string {
+	key := r.Header.Get(constants.HeaderXAdminKey)
+	if key != "" {
+		return key
+	}
+	auth := r.Header.Get(constants.HeaderAuthorization)
+	if strings.HasPrefix(auth, constants.BearerPrefix) {
+		return strings.TrimSpace(strings.TrimPrefix(auth, constants.BearerPrefix))
+	}
+	return ""
 }
 
 func adminDisabled(w http.ResponseWriter, r *http.Request) {

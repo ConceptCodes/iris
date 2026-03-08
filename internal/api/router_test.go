@@ -141,6 +141,30 @@ func TestRouterAdminMetrics(t *testing.T) {
 	}
 }
 
+func TestRouterAdminReadOnlyRole(t *testing.T) {
+	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, AdminAuthSettings{
+		AdminAPIKey:     "secret",
+		ReadOnlyAPIKeys: []string{"viewer"},
+	}, nil)
+
+	getReq := httptest.NewRequest("GET", "/admin/metrics", nil)
+	getReq.Header.Set("X-Admin-Key", "viewer")
+	getW := httptest.NewRecorder()
+	router.ServeHTTP(getW, getReq)
+	if getW.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected readonly access to GET admin route, got %d", getW.Result().StatusCode)
+	}
+
+	postReq := httptest.NewRequest("POST", "/admin/reindex", strings.NewReader(`{}`))
+	postReq.Header.Set("Content-Type", "application/json")
+	postReq.Header.Set("X-Admin-Key", "viewer")
+	postW := httptest.NewRecorder()
+	router.ServeHTTP(postW, postReq)
+	if postW.Result().StatusCode != http.StatusForbidden {
+		t.Fatalf("expected readonly write denial, got %d", postW.Result().StatusCode)
+	}
+}
+
 func TestRouterAdminDisabledWithoutKey(t *testing.T) {
 	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 	req := httptest.NewRequest("GET", "/admin/runs", nil)

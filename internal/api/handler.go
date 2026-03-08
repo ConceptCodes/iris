@@ -55,7 +55,7 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	id, err := h.indexer.IndexFromURL(r.Context(), req)
+	result, err := h.indexer.IndexFromURLResult(r.Context(), req)
 	if err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
@@ -65,7 +65,7 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics.ObserveIndexLatency("url", time.Since(start))
-	writeJSON(w, http.StatusOK, models.IndexResponse{ID: id, Message: "indexed"})
+	writeJSON(w, http.StatusOK, models.IndexResponse{ID: result.ID, Message: string(result.Status)})
 }
 
 func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +115,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	start := time.Now()
-	id, err := h.indexer.IndexUploadedBytes(r.Context(), buf, filename, tags, meta)
+	result, err := h.indexer.IndexUploadedBytesResult(r.Context(), buf, filename, tags, meta)
 	if err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
@@ -125,7 +125,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics.ObserveIndexLatency("upload", time.Since(start))
-	writeJSON(w, http.StatusOK, models.IndexResponse{ID: id, Message: "indexed"})
+	writeJSON(w, http.StatusOK, models.IndexResponse{ID: result.ID, Message: string(result.Status)})
 }
 
 func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
@@ -274,13 +274,15 @@ func (h *Handler) CreateSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	source, err := h.crawlService.CreateSource(r.Context(), crawl.CreateSourceInput{
-		Kind:           crawl.SourceKind(req.Kind),
-		SeedURL:        req.SeedURL,
-		LocalPath:      req.LocalPath,
-		MaxDepth:       req.MaxDepth,
-		RateLimitRPS:   req.RateLimitRPS,
-		AllowedDomains: req.AllowedDomains,
-		ScheduleEvery:  req.ScheduleEvery,
+		Kind:            crawl.SourceKind(req.Kind),
+		SeedURL:         req.SeedURL,
+		LocalPath:       req.LocalPath,
+		MaxDepth:        req.MaxDepth,
+		RateLimitRPS:    req.RateLimitRPS,
+		MaxPagesPerRun:  req.MaxPagesPerRun,
+		MaxImagesPerRun: req.MaxImagesPerRun,
+		AllowedDomains:  req.AllowedDomains,
+		ScheduleEvery:   req.ScheduleEvery,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
