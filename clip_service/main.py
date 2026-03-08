@@ -84,6 +84,8 @@ def embed_text(req: TextRequest):
 def embed_image(req: ImageRequest):
     try:
         image_bytes = base64.b64decode(req.image_b64)
+        if len(image_bytes) > 20 * 1024 * 1024:  # 20 MB limit
+            raise HTTPException(status_code=413, detail="Image size exceeds 20 MB limit")
         image = Image.open(BytesIO(image_bytes)).convert("RGB")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid image: {e}")
