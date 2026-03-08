@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -221,6 +222,20 @@ func handleCrawlerJob(ctx context.Context, jobStore jobs.Store, crawlStore crawl
 			return err
 		}
 		return crawlStore.MarkRunCompleted(ctx, payload.RunID, discovered, 0, 0)
+	case crawl.SourceKindDomain:
+		discovered, err := discoverDomainSource(ctx, jobStore, source)
+		if err != nil {
+			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error(), discovered, 0, 1)
+			return err
+		}
+		return crawlStore.MarkRunCompleted(ctx, payload.RunID, discovered, 0, 0)
+	case crawl.SourceKindSitemap:
+		discovered, err := discoverSitemapSource(ctx, jobStore, source)
+		if err != nil {
+			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error(), discovered, 0, 1)
+			return err
+		}
+		return crawlStore.MarkRunCompleted(ctx, payload.RunID, discovered, 0, 0)
 	default:
 		err := fmt.Errorf("source kind %s not implemented in crawler", source.Kind)
 		_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error(), 0, 0, 1)
@@ -294,4 +309,130 @@ func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL stri
 		count++
 	}
 	return count, nil
+}
+
+func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl.Source) (int, error) {
+	seed, err := url.Parse(source.SeedURL)
+	if err != nil {
+		return 0, err
+	}
+	allowedDomains := source.AllowedDomains
+	if len(allowedDomains) == 0 {
+		allowedDomains = []string{seed.Hostname()}
+	}
+	maxDepth := source.MaxDepth
+	if maxDepth <= 0 {
+		maxDepth = 1
+	}
+
+	type queueItem struct {
+		url   string
+		depth int
+	}
+	queue := []queueItem{{url: source.SeedURL, depth: 0}}
+	seenPages := map[string]struct{}{}
+	seenImages := map[string]struct{}{}
+	discovered := 0
+
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+		if _, exists := seenPages[item.url]; exists {
+			continue
+		}
+		seenPages[item.url] = struct{}{}
+
+		resp, err := fetchURL(ctx, item.url)
+		if err != nil {
+			return discovered, err
+		}
+		discovery, err := crawl.ExtractHTMLLinks(resp, item.url, allowedDomains)
+		if err != nil {
+			return discovered, err
+		}
+
+		for _, imageURL := range discovery.ImageURLs {
+			if _, exists := seenImages[imageURL]; exists {
+				continue
+			}
+			seenImages[imageURL] = struct{}{}
+			if err := enqueueFetchImage(ctx, jobStore, imageURL); err != nil {
+				return discovered, err
+			}
+			discovered++
+		}
+
+		if item.depth >= maxDepth {
+			continue
+		}
+		for _, pageURL := range discovery.PageURLs {
+			if _, exists := seenPages[pageURL]; exists {
+				continue
+			}
+			queue = append(queue, queueItem{url: pageURL, depth: item.depth + 1})
+		}
+	}
+
+	return discovered, nil
+}
+
+func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source crawl.Source) (int, error) {
+	locs, err := crawl.FetchSitemapLocs(ctx, source.SeedURL)
+	if err != nil {
+		return 0, err
+	}
+	discovered := 0
+	for _, loc := range locs {
+		if crawl.LooksLikeImageURL(loc) {
+			if err := enqueueFetchImage(ctx, jobStore, loc); err != nil {
+				return discovered, err
+			}
+			discovered++
+			continue
+		}
+
+		resp, err := fetchURL(ctx, loc)
+		if err != nil {
+			return discovered, err
+		}
+		discovery, err := crawl.ExtractHTMLLinks(resp, loc, source.AllowedDomains)
+		if err != nil {
+			return discovered, err
+		}
+		for _, imageURL := range discovery.ImageURLs {
+			if err := enqueueFetchImage(ctx, jobStore, imageURL); err != nil {
+				return discovered, err
+			}
+			discovered++
+		}
+	}
+	return discovered, nil
+}
+
+func fetchURL(ctx context.Context, rawURL string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("fetch %s: status %d", rawURL, resp.StatusCode)
+	}
+	return resp.Body, nil
+}
+
+func enqueueFetchImage(ctx context.Context, jobStore jobs.Store, imageURL string) error {
+	payload, err := json.Marshal(jobs.FetchImagePayload{URL: imageURL})
+	if err != nil {
+		return err
+	}
+	_, err = jobStore.Enqueue(ctx, jobs.Job{
+		Type:        jobs.TypeFetchImage,
+		PayloadJSON: payload,
+	})
+	return err
 }
