@@ -6,8 +6,9 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/google/uuid"
 	"iris/pkg/models"
+
+	"github.com/google/uuid"
 )
 
 const defaultTopK = 20
@@ -21,6 +22,7 @@ type Engine interface {
 	SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error)
 	GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error)
 	FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error)
+	ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error)
 }
 
 type ClipClient interface {
@@ -34,6 +36,7 @@ type VectorStore interface {
 	Search(ctx context.Context, embedding models.Embedding, topK int, filters map[string]string) ([]models.SearchResult, error)
 	GetVector(ctx context.Context, id string) (models.Embedding, error)
 	FindIDByMeta(ctx context.Context, key, value string) (string, bool, error)
+	ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error)
 }
 
 type engineImpl struct {
@@ -199,6 +202,13 @@ func (e *engineImpl) FindExistingID(ctx context.Context, meta map[string]string,
 		}
 	}
 	return "", false, nil
+}
+
+func (e *engineImpl) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
+	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
+	return e.store.ListImages(ctx, filters, limit, offset)
 }
 
 func normalize(vec models.Embedding) {

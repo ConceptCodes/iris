@@ -119,6 +119,10 @@ func (m *mockStore) FindIDByMeta(ctx context.Context, key, value string) (string
 	return m.findID, m.findOK, m.err
 }
 
+func (m *mockStore) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
+	return []models.ImageRecord{}, m.err
+}
+
 func TestEngine_IndexFromURL(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		mc := &mockClip{emb: models.Embedding{1.0, 0.0}}

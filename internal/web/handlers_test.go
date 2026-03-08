@@ -58,6 +58,10 @@ func (m *mockSearchEngine) FindExistingID(ctx context.Context, meta map[string]s
 	return "", false, m.err
 }
 
+func (m *mockSearchEngine) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
+	return []models.ImageRecord{}, m.err
+}
+
 func TestSearchResults(t *testing.T) {
 	t.Run("engine error full page", func(t *testing.T) {
 		h := NewHandlers(&mockSearchEngine{err: errors.New("err")})
