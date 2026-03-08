@@ -2,3 +2,6 @@
 # Binaries
 /server
 /indexer
+
+.env
+.env.*

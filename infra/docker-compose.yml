@@ -3,10 +3,8 @@ version: "3.9"
 services:
   postgres:
     image: postgres:16-alpine
-    environment:
-      - POSTGRES_USER=iris
-      - POSTGRES_PASSWORD=iris
-      - POSTGRES_DB=iris
+    env_file:
+      - .env.docker
     ports:
       - "5432:5432"
     volumes:
@@ -34,12 +32,13 @@ services:
   # ── CLIP embedding sidecar ─────────────────────────────────────────────────
   clip:
     build:
-      context: ./clip_service
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: clip
     ports:
       - "8001:8001"
-    environment:
-      - MODEL=ViT-B-32       # swap to ViT-L-14 for higher quality
+    env_file:
+      - .env.docker
     # Uncomment for GPU support:
     # deploy:
     #   resources:
@@ -57,22 +56,15 @@ services:
   # ── Go API server ──────────────────────────────────────────────────────────
   server:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: infra/Dockerfile
       target: server
     ports:
       - "8080:8080"
-    environment:
-      - CLIP_ADDR=http://clip:8001
-      - QDRANT_ADDR=qdrant:6334
-      - CLIP_DIM=512
-      - HTTP_ADDR=:8080
-      - ASSET_DIR=/data/assets
-      - JOB_BACKEND=postgres
-      - JOB_STORE_DSN=postgres://iris:iris@postgres:5432/iris?sslmode=disable
-      - ADMIN_API_KEY=dev-admin-key
+    env_file:
+      - .env.docker
     volumes:
-      - ./data/assets:/data/assets
+      - ../data/assets:/data/assets
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,23 +75,15 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: infra/Dockerfile
       target: worker
     command: ["-seed-url-file", "/examples/demo-urls.txt"]
-    environment:
-      - CLIP_ADDR=http://clip:8001
-      - QDRANT_ADDR=qdrant:6334
-      - CLIP_DIM=512
-      - ASSET_DIR=/data/assets
-      - WORKER_MODE=indexer
-      - JOB_BACKEND=postgres
-      - JOB_STORE_DSN=postgres://iris:iris@postgres:5432/iris?sslmode=disable
-      - JOB_POLL_INTERVAL=1s
-      - LEASE_DURATION=30s
+    env_file:
+      - .env.docker
     volumes:
-      - ./data/assets:/data/assets
-      - ./examples:/examples
+      - ../data/assets:/data/assets
+      - ../examples:/examples
     depends_on:
       postgres:
         condition: service_healthy

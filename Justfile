@@ -10,7 +10,7 @@ test:
   go test ./...
 
 dev:
-  docker compose up --build
+  docker compose -f infra/docker-compose.yml up --build
 
 run-server:
   go run ./cmd/server
