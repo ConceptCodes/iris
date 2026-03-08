@@ -15,6 +15,7 @@ const (
 	defaultAssetDir    = "./data/assets"
 	defaultWorkerMode  = "indexer"
 	defaultJobBackend  = "memory"
+	defaultJobStoreDSN = "postgres://iris:iris@localhost:5432/iris?sslmode=disable"
 )
 
 const (
@@ -43,6 +44,7 @@ type Worker struct {
 	Shared
 	Mode            string
 	JobBackend      string
+	JobStoreDSN     string
 	JobPollInterval time.Duration
 	LeaseDuration   time.Duration
 }
@@ -72,6 +74,10 @@ func LoadWorker() Worker {
 		Shared:     loadShared(),
 		Mode:       getEnv("WORKER_MODE", defaultWorkerMode),
 		JobBackend: getEnv("JOB_BACKEND", defaultJobBackend),
+		JobStoreDSN: getEnv(
+			"JOB_STORE_DSN",
+			defaultJobStoreDSN,
+		),
 		JobPollInterval: getEnvDuration(
 			"JOB_POLL_INTERVAL",
 			time.Second,

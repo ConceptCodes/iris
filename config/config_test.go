@@ -74,6 +74,7 @@ func TestLoadIndexerInvalidIntFallbacks(t *testing.T) {
 func TestLoadWorkerDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("WORKER_MODE", "crawler")
 	t.Setenv("JOB_BACKEND", "memory")
+	t.Setenv("JOB_STORE_DSN", "postgres://worker:test@db:5432/iris?sslmode=disable")
 	t.Setenv("JOB_POLL_INTERVAL", "2s")
 	t.Setenv("LEASE_DURATION", "45s")
 
@@ -84,6 +85,9 @@ func TestLoadWorkerDefaultsAndOverrides(t *testing.T) {
 	}
 	if cfg.JobBackend != "memory" {
 		t.Fatalf("unexpected backend: %q", cfg.JobBackend)
+	}
+	if cfg.JobStoreDSN != "postgres://worker:test@db:5432/iris?sslmode=disable" {
+		t.Fatalf("unexpected dsn: %q", cfg.JobStoreDSN)
 	}
 	if cfg.JobPollInterval != 2*time.Second {
 		t.Fatalf("unexpected poll interval: %s", cfg.JobPollInterval)
