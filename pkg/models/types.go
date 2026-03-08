@@ -48,3 +48,22 @@ type IndexResponse struct {
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
+
+type CrawlSourceRequest struct {
+	Kind           string   `json:"kind"`
+	SeedURL        string   `json:"seed_url,omitempty"`
+	LocalPath      string   `json:"local_path,omitempty"`
+	MaxDepth       int      `json:"max_depth,omitempty"`
+	RateLimitRPS   int      `json:"rate_limit_rps,omitempty"`
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+}
+
+type CrawlSourceResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type TriggerRunResponse struct {
+	RunID  string `json:"run_id"`
+	Status string `json:"status"`
+}

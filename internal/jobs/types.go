@@ -58,3 +58,8 @@ type FetchImagePayload struct {
 type IndexLocalFilePayload struct {
 	Path string `json:"path"`
 }
+
+type DiscoverSourcePayload struct {
+	SourceID string `json:"source_id"`
+	RunID    string `json:"run_id"`
+}
