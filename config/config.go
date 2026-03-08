@@ -16,6 +16,7 @@ const (
 	defaultWorkerMode  = "indexer"
 	defaultJobBackend  = "memory"
 	defaultJobStoreDSN = "postgres://iris:iris@localhost:5432/iris?sslmode=disable"
+	defaultAdminAPIKey = ""
 )
 
 const (
@@ -35,6 +36,7 @@ type Server struct {
 	HTTPAddr    string
 	JobBackend  string
 	JobStoreDSN string
+	AdminAPIKey string
 }
 
 type Indexer struct {
@@ -65,6 +67,10 @@ func LoadServer() Server {
 		JobStoreDSN: getEnv(
 			"JOB_STORE_DSN",
 			defaultJobStoreDSN,
+		),
+		AdminAPIKey: getEnv(
+			"ADMIN_API_KEY",
+			defaultAdminAPIKey,
 		),
 	}
 }

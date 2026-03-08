@@ -11,7 +11,7 @@ import (
 )
 
 func TestRouterHealth(t *testing.T) {
-	router := NewRouter(nil, t.TempDir(), nil)
+	router := NewRouter(nil, t.TempDir(), nil, "")
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -25,7 +25,7 @@ func TestRouterHealth(t *testing.T) {
 }
 
 func TestRouterLanding(t *testing.T) {
-	router := NewRouter(nil, t.TempDir(), nil)
+	router := NewRouter(nil, t.TempDir(), nil, "")
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -39,7 +39,7 @@ func TestRouterLanding(t *testing.T) {
 }
 
 func TestRouterEndpoints(t *testing.T) {
-	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil)
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil, "")
 
 	tests := []struct {
 		method string
@@ -62,7 +62,7 @@ func TestRouterEndpoints(t *testing.T) {
 }
 
 func TestRouterMethodEnforcement(t *testing.T) {
-	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil)
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil, "")
 	req := httptest.NewRequest("POST", "/health", nil) // health is GET
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -72,7 +72,7 @@ func TestRouterMethodEnforcement(t *testing.T) {
 }
 
 func TestRouterMiddleware(t *testing.T) {
-	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil)
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil, "")
 
 	// CORS preflight
 	req := httptest.NewRequest("OPTIONS", "/search/text", nil)
@@ -100,14 +100,25 @@ func TestRouterMiddleware(t *testing.T) {
 
 func TestRouterAdminEndpoints(t *testing.T) {
 	crawlService := crawl.NewService(crawl.NewMemoryStore(), jobs.NewMemoryStore())
-	router := NewRouter(&mockSearchEngine{}, t.TempDir(), crawlService)
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), crawlService, "secret")
 
 	req := httptest.NewRequest("POST", "/admin/sources", strings.NewReader(`{"kind":"local_dir","local_path":"./images"}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Admin-Key", "secret")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 creating source, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestRouterAdminDisabledWithoutKey(t *testing.T) {
+	router := NewRouter(&mockSearchEngine{}, t.TempDir(), nil, "")
+	req := httptest.NewRequest("GET", "/admin/runs", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Result().StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Result().StatusCode)
 	}
 }

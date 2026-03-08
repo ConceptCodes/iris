@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,7 +17,7 @@ import (
 	"iris/internal/web"
 )
 
-func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Service) http.Handler {
+func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Service, adminAPIKey string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -37,6 +38,18 @@ func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Servic
 	h := NewHandler(engine, indexer, crawlService)
 	wh := web.NewHandlers(engine)
 
+	if adminAPIKey != "" {
+		r.With(requireAdminKey(adminAPIKey)).Post("/admin/sources", h.CreateSource)
+		r.With(requireAdminKey(adminAPIKey)).Post("/admin/sources/{id}/run", h.TriggerSourceRun)
+		r.With(requireAdminKey(adminAPIKey)).Get("/admin/runs", h.ListRuns)
+		r.With(requireAdminKey(adminAPIKey)).Get("/admin/runs/{id}", h.GetRun)
+	} else {
+		r.Post("/admin/sources", adminDisabled)
+		r.Post("/admin/sources/{id}/run", adminDisabled)
+		r.Get("/admin/runs", adminDisabled)
+		r.Get("/admin/runs/{id}", adminDisabled)
+	}
+
 	r.Get("/health", h.Health)
 
 	r.Get("/", wh.LandingPage)
@@ -51,10 +64,6 @@ func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Servic
 	r.Post("/search/text", h.SearchText)
 	r.Post("/search/image", h.SearchImage)
 	r.Post("/search/image/url", h.SearchImageURL)
-	r.Post("/admin/sources", h.CreateSource)
-	r.Post("/admin/sources/{id}/run", h.TriggerSourceRun)
-	r.Get("/admin/runs", h.ListRuns)
-	r.Get("/admin/runs/{id}", h.GetRun)
 	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetStore.Dir()))))
 
 	return r
@@ -89,4 +98,27 @@ func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, func(), er
 		crawlStore.Close()
 	}
 	return crawl.NewService(crawlStore, jobStore), cleanup, nil
+}
+
+func requireAdminKey(expected string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("X-Admin-Key")
+			if key == "" {
+				auth := r.Header.Get("Authorization")
+				if strings.HasPrefix(auth, "Bearer ") {
+					key = strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+				}
+			}
+			if key != expected {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func adminDisabled(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "admin api disabled", http.StatusServiceUnavailable)
 }

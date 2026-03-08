@@ -39,7 +39,7 @@ func main() {
 	} else if cleanup != nil {
 		defer cleanup()
 	}
-	router := api.NewRouter(engine, cfg.AssetDir, crawlService)
+	router := api.NewRouter(engine, cfg.AssetDir, crawlService, cfg.AdminAPIKey)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,

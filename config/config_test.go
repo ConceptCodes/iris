@@ -13,6 +13,7 @@ func TestLoadServerDefaults(t *testing.T) {
 	t.Setenv("ASSET_DIR", "")
 	t.Setenv("JOB_BACKEND", "")
 	t.Setenv("JOB_STORE_DSN", "")
+	t.Setenv("ADMIN_API_KEY", "")
 
 	cfg := LoadServer()
 
@@ -36,6 +37,9 @@ func TestLoadServerDefaults(t *testing.T) {
 	}
 	if cfg.JobStoreDSN != defaultJobStoreDSN {
 		t.Fatalf("expected default job store dsn, got %q", cfg.JobStoreDSN)
+	}
+	if cfg.AdminAPIKey != defaultAdminAPIKey {
+		t.Fatalf("expected default admin api key, got %q", cfg.AdminAPIKey)
 	}
 }
 
