@@ -27,17 +27,19 @@ func (s *MemoryStore) CreateSource(ctx context.Context, input CreateSourceInput)
 	now := time.Now().UTC()
 	scheduleEvery, _ := time.ParseDuration(input.ScheduleEvery)
 	source := Source{
-		ID:             uuid.NewString(),
-		Kind:           input.Kind,
-		SeedURL:        input.SeedURL,
-		LocalPath:      input.LocalPath,
-		Status:         SourceStatusActive,
-		MaxDepth:       input.MaxDepth,
-		RateLimitRPS:   input.RateLimitRPS,
-		AllowedDomains: slices.Clone(input.AllowedDomains),
-		ScheduleEvery:  scheduleEvery,
-		NextRunAt:      nextRunTime(now, scheduleEvery),
-		CreatedAt:      now,
+		ID:              uuid.NewString(),
+		Kind:            input.Kind,
+		SeedURL:         input.SeedURL,
+		LocalPath:       input.LocalPath,
+		Status:          SourceStatusActive,
+		MaxDepth:        input.MaxDepth,
+		RateLimitRPS:    input.RateLimitRPS,
+		MaxPagesPerRun:  input.MaxPagesPerRun,
+		MaxImagesPerRun: input.MaxImagesPerRun,
+		AllowedDomains:  slices.Clone(input.AllowedDomains),
+		ScheduleEvery:   scheduleEvery,
+		NextRunAt:       nextRunTime(now, scheduleEvery),
+		CreatedAt:       now,
 	}
 	s.sources = append(s.sources, source)
 	return source, nil
@@ -126,6 +128,22 @@ func (s *MemoryStore) IncrementRunIndexed(ctx context.Context, id string, delta 
 	return fmt.Errorf("run not found: %s", id)
 }
 
+func (s *MemoryStore) IncrementRunDuplicate(ctx context.Context, id string, delta int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, run := range s.runs {
+		if run.ID != id {
+			continue
+		}
+		run.DuplicateCount += delta
+		run.UpdatedAt = time.Now().UTC()
+		s.runs[index] = run
+		return nil
+	}
+	return fmt.Errorf("run not found: %s", id)
+}
+
 func (s *MemoryStore) IncrementRunFailed(ctx context.Context, id string, delta int, lastError string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -154,6 +172,7 @@ func (s *MemoryStore) MarkRunCompleted(ctx context.Context, id string) error {
 		run.Status = RunStatusCompleted
 		run.UpdatedAt = time.Now().UTC()
 		s.runs[index] = run
+		s.applySourceOutcomeLocked(run, true)
 		return nil
 	}
 	return fmt.Errorf("run not found: %s", id)
@@ -171,6 +190,7 @@ func (s *MemoryStore) MarkRunFailed(ctx context.Context, id, message string) err
 		run.LastError = message
 		run.UpdatedAt = time.Now().UTC()
 		s.runs[index] = run
+		s.applySourceOutcomeLocked(run, false)
 		return nil
 	}
 	return fmt.Errorf("run not found: %s", id)
@@ -215,6 +235,72 @@ func nextRunTime(now time.Time, every time.Duration) time.Time {
 		return time.Time{}
 	}
 	return now.Add(every)
+}
+
+func (s *MemoryStore) applySourceOutcomeLocked(run Run, success bool) {
+	for index, source := range s.sources {
+		if source.ID != run.SourceID {
+			continue
+		}
+		now := time.Now().UTC()
+		source.LastRunAt = now
+		source.LastDiscoveredCount = run.DiscoveredCount
+		source.LastIndexedCount = run.IndexedCount
+		source.LastDuplicateCount = run.DuplicateCount
+		source.LastFailedCount = run.FailedCount
+		if success {
+			source.LastSuccessAt = now
+			source.ConsecutiveFailures = 0
+			if run.IndexedCount > 0 {
+				source.LastContentChangeAt = now
+			}
+		} else {
+			source.ConsecutiveFailures++
+		}
+		source.NextRunAt = nextAdaptiveRunTime(now, source, run, success)
+		s.sources[index] = source
+		return
+	}
+}
+
+func nextAdaptiveRunTime(now time.Time, source Source, run Run, success bool) time.Time {
+	base := source.ScheduleEvery
+	if base <= 0 {
+		return time.Time{}
+	}
+	interval := base
+	switch {
+	case !success:
+		interval = clampDuration(base*time.Duration(source.ConsecutiveFailures+2), base, base*8)
+	case run.IndexedCount > 0 && (run.IndexedCount >= 5 || (source.MaxImagesPerRun > 0 && run.IndexedCount >= max(1, source.MaxImagesPerRun/2))):
+		interval = clampDuration(base/2, time.Minute, base)
+	case run.IndexedCount > 0:
+		interval = base
+	case run.DiscoveredCount == 0:
+		interval = clampDuration(base*4, base, base*8)
+	case run.DuplicateCount > 0 && run.IndexedCount == 0:
+		interval = clampDuration(base*3, base, base*8)
+	default:
+		interval = clampDuration(base*2, base, base*8)
+	}
+	return now.Add(interval)
+}
+
+func clampDuration(v, minV, maxV time.Duration) time.Duration {
+	if minV > 0 && v < minV {
+		return minV
+	}
+	if maxV > 0 && v > maxV {
+		return maxV
+	}
+	return v
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (s *MemoryStore) Close() error {

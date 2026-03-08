@@ -13,6 +13,7 @@ type Store interface {
 	GetRun(ctx context.Context, id string) (Run, error)
 	SetRunDiscovered(ctx context.Context, id string, discovered int) error
 	IncrementRunIndexed(ctx context.Context, id string, delta int) error
+	IncrementRunDuplicate(ctx context.Context, id string, delta int) error
 	IncrementRunFailed(ctx context.Context, id string, delta int, lastError string) error
 	MarkRunCompleted(ctx context.Context, id string) error
 	MarkRunFailed(ctx context.Context, id, message string) error
