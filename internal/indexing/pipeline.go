@@ -14,6 +14,7 @@ import (
 
 	"iris/internal/assets"
 	"iris/internal/constants"
+	"iris/internal/metrics"
 	"iris/pkg/models"
 
 	"github.com/google/uuid"
@@ -23,6 +24,20 @@ type Engine interface {
 	IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error)
 	IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error)
 	ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error)
+	FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error)
+}
+
+type ResultStatus string
+
+const (
+	ResultStatusIndexed   ResultStatus = "indexed"
+	ResultStatusDuplicate ResultStatus = "duplicate"
+	ResultStatusReindexed ResultStatus = "reindexed"
+)
+
+type Result struct {
+	ID     string
+	Status ResultStatus
 }
 
 type Pipeline struct {
@@ -62,12 +77,20 @@ func NewPipelineWithOptions(engine Engine, assetStore assets.Store, options Pipe
 }
 
 func (p *Pipeline) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
+	result, err := p.IndexFromURLResult(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return result.ID, nil
+}
+
+func (p *Pipeline) IndexFromURLResult(ctx context.Context, req models.IndexRequest) (Result, error) {
 	if req.URL == "" {
-		return "", fmt.Errorf("url is required")
+		return Result{}, fmt.Errorf("url is required")
 	}
 	imageBytes, mimeType, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	record := models.ImageRecord{
 		ID:       uuid.New().String(),
@@ -86,6 +109,14 @@ func (p *Pipeline) IndexFromURL(ctx context.Context, req models.IndexRequest) (s
 }
 
 func (p *Pipeline) IndexUploadedBytes(ctx context.Context, imageBytes []byte, filename string, tags []string, meta map[string]string) (string, error) {
+	result, err := p.IndexUploadedBytesResult(ctx, imageBytes, filename, tags, meta)
+	if err != nil {
+		return "", err
+	}
+	return result.ID, nil
+}
+
+func (p *Pipeline) IndexUploadedBytesResult(ctx context.Context, imageBytes []byte, filename string, tags []string, meta map[string]string) (Result, error) {
 	record := models.ImageRecord{
 		ID:       uuid.New().String(),
 		Filename: filename,
@@ -96,9 +127,17 @@ func (p *Pipeline) IndexUploadedBytes(ctx context.Context, imageBytes []byte, fi
 }
 
 func (p *Pipeline) IndexLocalFile(ctx context.Context, path string) (string, error) {
+	result, err := p.IndexLocalFileResult(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	return result.ID, nil
+}
+
+func (p *Pipeline) IndexLocalFileResult(ctx context.Context, path string) (Result, error) {
 	imageBytes, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read local image: %w", err)
+		return Result{}, fmt.Errorf("read local image: %w", err)
 	}
 
 	record := models.ImageRecord{
@@ -113,12 +152,20 @@ func (p *Pipeline) IndexLocalFile(ctx context.Context, path string) (string, err
 }
 
 func (p *Pipeline) ReindexFromURL(ctx context.Context, imageURL string, record models.ImageRecord) (string, error) {
+	result, err := p.ReindexFromURLResult(ctx, imageURL, record)
+	if err != nil {
+		return "", err
+	}
+	return result.ID, nil
+}
+
+func (p *Pipeline) ReindexFromURLResult(ctx context.Context, imageURL string, record models.ImageRecord) (Result, error) {
 	if imageURL == "" {
-		return "", fmt.Errorf("url is required")
+		return Result{}, fmt.Errorf("url is required")
 	}
 	imageBytes, mimeType, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	if record.Meta == nil {
 		record.Meta = map[string]string{}
@@ -130,7 +177,7 @@ func (p *Pipeline) ReindexFromURL(ctx context.Context, imageURL string, record m
 	return p.indexBytes(ctx, imageBytes, record, true)
 }
 
-func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord, force bool) (string, error) {
+func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord, force bool) (Result, error) {
 	if record.Meta == nil {
 		record.Meta = map[string]string{}
 	}
@@ -150,10 +197,20 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 			record.Meta[constants.MetaKeySourceDomain] = u.Hostname()
 		}
 	}
+	if !force {
+		existing, ok, err := p.engine.FindExistingID(ctx, record.Meta, record.Meta[constants.MetaKeySourceURL])
+		if err != nil {
+			return Result{}, err
+		}
+		if ok {
+			metrics.IncDedupeEvent(dedupeReason(record.Meta))
+			return Result{ID: existing, Status: ResultStatusDuplicate}, nil
+		}
+	}
 	if p.assetStore != nil {
 		assetURL, err := p.assetStore.Save(record.ID, record.Filename, imageBytes)
 		if err != nil {
-			return "", fmt.Errorf("store image asset: %w", err)
+			return Result{}, fmt.Errorf("store image asset: %w", err)
 		}
 		record.URL = assetURL
 	}
@@ -161,9 +218,30 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 		record.Meta[constants.MetaKeySourceURL] = record.URL
 	}
 	if force {
-		return p.engine.ReindexFromBytes(ctx, imageBytes, record)
+		id, err := p.engine.ReindexFromBytes(ctx, imageBytes, record)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{ID: id, Status: ResultStatusReindexed}, nil
 	}
-	return p.engine.IndexFromBytes(ctx, imageBytes, record)
+	id, err := p.engine.IndexFromBytes(ctx, imageBytes, record)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{ID: id, Status: ResultStatusIndexed}, nil
+}
+
+func dedupeReason(meta map[string]string) string {
+	if meta == nil {
+		return "unknown"
+	}
+	if meta[constants.MetaKeyContentSHA256] != "" {
+		return constants.MetaKeyContentSHA256
+	}
+	if meta[constants.MetaKeySourceURL] != "" {
+		return constants.MetaKeySourceURL
+	}
+	return "unknown"
 }
 
 func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int) ([]byte, string, error) {
