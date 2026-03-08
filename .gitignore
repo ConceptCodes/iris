@@ -1,7 +1,9 @@
 .agents/
+.sisyphus/
+__pycache__/
+
 # Binaries
-/server
-/indexer
+bin/
 
 .env
 .env.*

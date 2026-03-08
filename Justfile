@@ -4,13 +4,20 @@ default:
   @just --list
 
 build:
-  go build ./...
+  @mkdir -p bin
+  go build -o bin/server ./cmd/server
+  go build -o bin/indexer ./cmd/indexer
+  go build -o bin/worker ./cmd/worker
 
 test:
   go test ./...
 
 dev:
   docker compose -f infra/docker-compose.yml up --build
+
+clean:
+  rm -rf bin/
+  go clean
 
 run-server:
   go run ./cmd/server
