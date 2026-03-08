@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/davidojo/google-images/pkg/models"
+	"iris/pkg/models"
 	pb "github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

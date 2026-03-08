@@ -5,16 +5,16 @@ import (
 	"strconv"
 
 	"github.com/a-h/templ"
-	"github.com/davidojo/google-images/internal/search"
-	"github.com/davidojo/google-images/pkg/models"
-	"github.com/davidojo/google-images/web/templates"
+	"iris/internal/search"
+	"iris/pkg/models"
+	"iris/web/templates"
 )
 
 type Handlers struct {
-	engine *search.Engine
+	engine search.Engine
 }
 
-func NewHandlers(engine *search.Engine) *Handlers {
+func NewHandlers(engine search.Engine) *Handlers {
 	return &Handlers{engine: engine}
 }
 

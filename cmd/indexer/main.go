@@ -9,15 +9,17 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/davidojo/google-images/internal/clip"
-	"github.com/davidojo/google-images/internal/search"
-	"github.com/davidojo/google-images/internal/store"
-	"github.com/davidojo/google-images/pkg/models"
+	"github.com/google/uuid"
+	"iris/config"
+	"iris/internal/assets"
+	"iris/internal/clip"
+	"iris/internal/search"
+	"iris/internal/store"
+	"iris/pkg/models"
 )
 
 var imageExts = map[string]bool{
@@ -43,15 +45,12 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	clipAddr := getEnv("CLIP_ADDR", "http://localhost:8001")
-	qdrantAddr := getEnv("QDRANT_ADDR", "localhost:6334")
-	clipDim := getEnvInt("CLIP_DIM", 512)
-	concurrency := getEnvInt("CONCURRENCY", 4)
+	cfg := config.LoadIndexer()
 
-	slog.Info("starting indexer", "mode", *mode, "input", *input, "concurrency", concurrency)
+	slog.Info("starting indexer", "mode", *mode, "input", *input, "concurrency", cfg.Concurrency, "asset_dir", cfg.AssetDir)
 
-	clipClient := clip.NewClient(clipAddr)
-	qdrantStore, err := store.NewQdrantStore(qdrantAddr, clipDim, 15*time.Second)
+	clipClient := clip.NewClient(cfg.ClipAddr)
+	qdrantStore, err := store.NewQdrantStore(cfg.QdrantAddr, cfg.ClipDim, 15*time.Second)
 	if err != nil {
 		slog.Error("failed to connect to qdrant", "error", err)
 		os.Exit(1)
@@ -59,6 +58,7 @@ func main() {
 	defer qdrantStore.Close()
 
 	engine := search.NewEngine(clipClient, qdrantStore)
+	assetStore := assets.NewStore(cfg.AssetDir)
 
 	var jobs []string
 	switch *mode {
@@ -73,19 +73,19 @@ func main() {
 
 	slog.Info("collected jobs", "count", len(jobs))
 
-	jobsCh := make(chan string, concurrency*2)
+	jobsCh := make(chan string, cfg.Concurrency*2)
 	var indexed, failed atomic.Int64
 
-	for i := 0; i < concurrency; i++ {
+	for i := 0; i < cfg.Concurrency; i++ {
 		go func() {
-			for url := range jobsCh {
+			for job := range jobsCh {
 				start := time.Now()
-				_, err := engine.IndexFromURL(context.Background(), models.IndexRequest{URL: url})
+				err := indexJob(context.Background(), engine, assetStore, *mode, job)
 				if err != nil {
-					slog.Error("index failed", "url", url, "error", err)
+					slog.Error("index failed", "job", job, "error", err)
 					failed.Add(1)
 				} else {
-					slog.Info("indexed", "url", url, "elapsed_ms", time.Since(start).Milliseconds())
+					slog.Info("indexed", "job", job, "elapsed_ms", time.Since(start).Milliseconds())
 					indexed.Add(1)
 				}
 			}
@@ -112,12 +112,54 @@ func collectDirJobs(dir string) []string {
 		}
 		ext := strings.ToLower(filepath.Ext(path))
 		if imageExts[ext] {
-			abs, _ := filepath.Abs(path)
-			jobs = append(jobs, "file://"+abs)
+			abs, absErr := filepath.Abs(path)
+			if absErr == nil {
+				jobs = append(jobs, abs)
+			}
 		}
 		return nil
 	})
 	return jobs
+}
+
+func indexJob(ctx context.Context, engine search.Engine, assetStore *assets.Store, mode, job string) error {
+	switch mode {
+	case "dir":
+		return indexLocalFile(ctx, engine, assetStore, job)
+	case "urls":
+		_, err := engine.IndexFromURL(ctx, models.IndexRequest{URL: job})
+		return err
+	default:
+		return fmt.Errorf("unsupported mode: %s", mode)
+	}
+}
+
+func indexLocalFile(ctx context.Context, engine search.Engine, assetStore *assets.Store, path string) error {
+	imageBytes, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read local image: %w", err)
+	}
+
+	id := uuid.New().String()
+	filename := filepath.Base(path)
+	record := models.ImageRecord{
+		ID:       id,
+		Filename: filename,
+		Meta: map[string]string{
+			"source":      "local",
+			"source_path": path,
+		},
+	}
+	if assetStore != nil {
+		assetURL, err := assetStore.Save(id, filename, imageBytes)
+		if err != nil {
+			return fmt.Errorf("store local image: %w", err)
+		}
+		record.URL = assetURL
+	}
+
+	_, err = engine.IndexFromBytes(ctx, imageBytes, record)
+	return err
 }
 
 func collectURLJobs(path string) []string {
@@ -137,22 +179,6 @@ func collectURLJobs(path string) []string {
 		jobs = append(jobs, line)
 	}
 	return jobs
-}
-
-func getEnv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func getEnvInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
-	}
-	return def
 }
 
 func init() {

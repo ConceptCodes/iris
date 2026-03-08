@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/davidojo/google-images/pkg/models"
+	"iris/pkg/models"
 )
 
 const maxImageSize = 20 << 20

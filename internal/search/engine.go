@@ -2,29 +2,53 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"reflect"
 
-	"github.com/davidojo/google-images/internal/clip"
-	"github.com/davidojo/google-images/internal/store"
-	"github.com/davidojo/google-images/pkg/models"
+	"iris/pkg/models"
 	"github.com/google/uuid"
 )
 
 const defaultTopK = 20
 
-type Engine struct {
-	clip  *clip.Client
-	store *store.QdrantStore
+type Engine interface {
+	IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error)
+	IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error)
+	SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error)
+	SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error)
+	SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error)
+	GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error)
 }
 
-func NewEngine(clipClient *clip.Client, qdrantStore *store.QdrantStore) *Engine {
-	return &Engine{
+type ClipClient interface {
+	EmbedText(ctx context.Context, text string) (models.Embedding, error)
+	EmbedImageBytes(ctx context.Context, imageBytes []byte) (models.Embedding, error)
+	EmbedImageURL(ctx context.Context, imageURL string) (models.Embedding, error)
+}
+
+type VectorStore interface {
+	Upsert(ctx context.Context, record models.ImageRecord, embedding models.Embedding) (string, error)
+	Search(ctx context.Context, embedding models.Embedding, topK int, filters map[string]string) ([]models.SearchResult, error)
+	GetVector(ctx context.Context, id string) (models.Embedding, error)
+}
+
+type engineImpl struct {
+	clip  ClipClient
+	store VectorStore
+}
+
+func NewEngine(clipClient ClipClient, qdrantStore VectorStore) Engine {
+	return &engineImpl{
 		clip:  clipClient,
 		store: qdrantStore,
 	}
 }
 
-func (e *Engine) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
+func (e *engineImpl) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
+	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
 	embedding, err := e.clip.EmbedImageURL(ctx, req.URL)
 	if err != nil {
 		return "", err
@@ -40,7 +64,10 @@ func (e *Engine) IndexFromURL(ctx context.Context, req models.IndexRequest) (str
 	return e.store.Upsert(ctx, record, embedding)
 }
 
-func (e *Engine) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+func (e *engineImpl) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
 	if record.ID == "" {
 		record.ID = uuid.New().String()
 	}
@@ -52,7 +79,10 @@ func (e *Engine) IndexFromBytes(ctx context.Context, imageBytes []byte, record m
 	return e.store.Upsert(ctx, record, embedding)
 }
 
-func (e *Engine) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
+func (e *engineImpl) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
+	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
 	topK := req.TopK
 	if topK == 0 {
 		topK = defaultTopK
@@ -65,7 +95,10 @@ func (e *Engine) SearchByText(ctx context.Context, req models.TextSearchRequest)
 	return e.store.Search(ctx, embedding, topK, req.Filters)
 }
 
-func (e *Engine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (e *engineImpl) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
+	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
 	if topK == 0 {
 		topK = defaultTopK
 	}
@@ -77,7 +110,10 @@ func (e *Engine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK
 	return e.store.Search(ctx, embedding, topK, filters)
 }
 
-func (e *Engine) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (e *engineImpl) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error) {
+	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
 	if topK == 0 {
 		topK = defaultTopK
 	}
@@ -89,7 +125,10 @@ func (e *Engine) SearchByImageURL(ctx context.Context, url string, topK int, fil
 	return e.store.Search(ctx, embedding, topK, filters)
 }
 
-func (e *Engine) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
+func (e *engineImpl) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
+	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
 	if topK == 0 {
 		topK = defaultTopK
 	}
