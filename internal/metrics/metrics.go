@@ -81,6 +81,13 @@ var (
 		},
 	)
 
+	crawlJobsDuplicateCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "iris_crawl_jobs_duplicate_total",
+			Help: "Total number of crawl jobs skipped because the image already exists",
+		},
+	)
+
 	crawlJobsFailedCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "iris_crawl_jobs_failed_total",
@@ -109,6 +116,47 @@ var (
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		},
 	)
+
+	dedupeEventsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "iris_dedupe_events_total",
+			Help: "Total number of corpus-wide dedupe events",
+		},
+		[]string{"reason"},
+	)
+
+	crawlSkipsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "iris_crawl_skips_total",
+			Help: "Total number of crawl items skipped by policy",
+		},
+		[]string{"reason"},
+	)
+
+	crawlBudgetHitsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "iris_crawl_budget_hits_total",
+			Help: "Total number of crawl budget limits hit",
+		},
+		[]string{"budget"},
+	)
+
+	schedulerDecisionsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "iris_scheduler_decisions_total",
+			Help: "Total number of adaptive scheduler decisions",
+		},
+		[]string{"decision"},
+	)
+
+	schedulerNextRunHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "iris_scheduler_next_run_seconds",
+			Help:    "Next-run delays selected by the adaptive scheduler",
+			Buckets: []float64{60, 300, 900, 1800, 3600, 7200, 14400, 28800},
+		},
+		[]string{"decision"},
+	)
 )
 
 func init() {
@@ -122,10 +170,16 @@ func init() {
 		crawlRunsQueuedCounter,
 		crawlJobsDiscoveredCounter,
 		crawlJobsIndexedCounter,
+		crawlJobsDuplicateCounter,
 		crawlJobsFailedCounter,
 		workerJobsSucceededCounter,
 		workerJobsFailedCounter,
 		workerJobLatencyHistogram,
+		dedupeEventsCounter,
+		crawlSkipsCounter,
+		crawlBudgetHitsCounter,
+		schedulerDecisionsCounter,
+		schedulerNextRunHistogram,
 	)
 }
 
@@ -242,6 +296,11 @@ func IncCrawlJobsIndexed() {
 	crawlJobsIndexedCounter.Inc()
 }
 
+// IncCrawlJobsDuplicate increments the crawl duplicate counter
+func IncCrawlJobsDuplicate() {
+	crawlJobsDuplicateCounter.Inc()
+}
+
 // IncCrawlJobsFailed increments the crawl jobs failed counter
 func IncCrawlJobsFailed() {
 	crawlJobsFailedCounter.Inc()
@@ -260,6 +319,27 @@ func IncWorkerJobFailed() {
 // ObserveWorkerJobLatency records the latency of a worker job
 func ObserveWorkerJobLatency(duration time.Duration) {
 	workerJobLatencyHistogram.Observe(duration.Seconds())
+}
+
+// IncDedupeEvent increments dedupe decisions by reason.
+func IncDedupeEvent(reason string) {
+	dedupeEventsCounter.WithLabelValues(reason).Inc()
+}
+
+// IncCrawlSkip increments crawl policy skips by reason.
+func IncCrawlSkip(reason string) {
+	crawlSkipsCounter.WithLabelValues(reason).Inc()
+}
+
+// IncCrawlBudgetHit increments crawl budget hit counters.
+func IncCrawlBudgetHit(budget string) {
+	crawlBudgetHitsCounter.WithLabelValues(budget).Inc()
+}
+
+// ObserveSchedulerDecision records adaptive scheduler choices.
+func ObserveSchedulerDecision(decision string, nextIn time.Duration) {
+	schedulerDecisionsCounter.WithLabelValues(decision).Inc()
+	schedulerNextRunHistogram.WithLabelValues(decision).Observe(nextIn.Seconds())
 }
 
 // Handler returns an HTTP handler for the /metrics endpoint
