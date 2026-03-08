@@ -51,12 +51,14 @@ What is implemented now:
 - domain, sitemap, local-dir, and url-list crawl source types
 - crawl source and run persistence
 - admin APIs for creating sources and triggering runs
+- downstream job dedupe within a crawl run
+- per-source crawl throttling via `rate_limit_rps`
+- crawl run counters for discovered, indexed, and failed items
 - Docker Compose services for Postgres and worker
 
 What is scaffolded but not finished:
 
-- run progress aggregation beyond enqueue counts
-- richer crawl controls like rate limiting and robots handling
+- advanced crawl controls like robots.txt and canonical handling
 - auth beyond a single shared admin API key
 
 ## Quick Start
@@ -192,6 +194,7 @@ curl -X POST http://localhost:8080/admin/sources \
     "kind": "domain",
     "seed_url": "https://example.com",
     "max_depth": 1,
+    "rate_limit_rps": 2,
     "allowed_domains": ["example.com"]
   }'
 ```
@@ -205,6 +208,7 @@ curl -X POST http://localhost:8080/admin/sources \
   -d '{
     "kind": "sitemap",
     "seed_url": "https://example.com/sitemap.xml",
+    "rate_limit_rps": 2,
     "allowed_domains": ["example.com"]
   }'
 ```
@@ -262,12 +266,14 @@ What it does today:
 - handles `fetch_image` and `index_local_file`
 - handles `discover_source` for `local_dir`, `url_list`, `domain`, and `sitemap` sources
 - reuses `internal/indexing`
-- updates crawl runs in the crawl store
+- dedupes downstream image and local-file jobs within a run
+- applies per-source crawl throttling when `rate_limit_rps` is set
+- updates crawl runs as discovery and indexing progress
 
 What it does not do yet:
 
-- follow advanced crawl policies like robots.txt or rate limiting
-- maintain rich per-run indexing statistics
+- follow advanced crawl policies like robots.txt
+- expose job dedupe and crawl metrics through richer admin dashboards
 
 ## Configuration
 
