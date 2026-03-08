@@ -15,6 +15,9 @@ test:
 dev:
   docker compose -f infra/docker-compose.yml up --build
 
+shutdown:
+  docker compose -f infra/docker-compose.yml down
+
 clean:
   rm -rf bin/
   go clean
