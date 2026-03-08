@@ -1,0 +1,8 @@
+# Small public demo corpus for bootstrapping the index.
+# These Wikimedia redirect URLs resolve to stable raw image assets.
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Cat03.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Golde33443.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/The_Earth_seen_from_Apollo_17.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Fronalpstock_big.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Palace_of_Westminster,_London_-_Feb_2007.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Albert_Einstein_Head.jpg
