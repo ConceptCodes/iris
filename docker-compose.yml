@@ -1,6 +1,22 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=iris
+      - POSTGRES_PASSWORD=iris
+      - POSTGRES_DB=iris
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iris -d iris"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # ── Qdrant vector database ─────────────────────────────────────────────────
   qdrant:
     image: qdrant/qdrant:v1.9.2
@@ -60,5 +76,33 @@ services:
       clip:
         condition: service_healthy
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    command: ["-seed-url-file", "/examples/demo-urls.txt"]
+    environment:
+      - CLIP_ADDR=http://clip:8001
+      - QDRANT_ADDR=qdrant:6334
+      - CLIP_DIM=512
+      - ASSET_DIR=/data/assets
+      - WORKER_MODE=indexer
+      - JOB_BACKEND=postgres
+      - JOB_STORE_DSN=postgres://iris:iris@postgres:5432/iris?sslmode=disable
+      - JOB_POLL_INTERVAL=1s
+      - LEASE_DURATION=30s
+    volumes:
+      - ./data/assets:/data/assets
+      - ./examples:/examples
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      clip:
+        condition: service_healthy
+
 volumes:
   qdrant_data:
+  postgres_data:
