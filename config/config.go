@@ -7,16 +7,19 @@ import (
 )
 
 const (
-	defaultClipAddr    = "http://localhost:8001"
-	defaultQdrantAddr  = "localhost:6334"
-	defaultClipDim     = 512
-	defaultHTTPAddr    = ":8080"
-	defaultConcurrency = 4
-	defaultAssetDir    = "./data/assets"
-	defaultWorkerMode  = "indexer"
-	defaultJobBackend  = "memory"
-	defaultJobStoreDSN = "postgres://iris:iris@localhost:5432/iris?sslmode=disable"
-	defaultAdminAPIKey = ""
+	defaultClipAddr        = "http://localhost:8001"
+	defaultQdrantAddr      = "localhost:6334"
+	defaultClipDim         = 512
+	defaultHTTPAddr        = ":8080"
+	defaultConcurrency     = 4
+	defaultAssetDir        = "./data/assets"
+	defaultWorkerMode      = "indexer"
+	defaultJobBackend      = "memory"
+	defaultJobStoreDSN     = "postgres://iris:iris@localhost:5432/iris?sslmode=disable"
+	defaultAdminAPIKey     = ""
+	defaultFetchRetries    = 2
+	defaultHostConcurrency = 2
+	defaultCachePruneBatch = 500
 )
 
 const (
@@ -46,11 +49,18 @@ type Indexer struct {
 
 type Worker struct {
 	Shared
-	Mode            string
-	JobBackend      string
-	JobStoreDSN     string
-	JobPollInterval time.Duration
-	LeaseDuration   time.Duration
+	Mode               string
+	JobBackend         string
+	JobStoreDSN        string
+	JobPollInterval    time.Duration
+	LeaseDuration      time.Duration
+	FetchRetries       int
+	FetchRetryBackoff  time.Duration
+	HostConcurrency    int
+	HTTPCacheTTL       time.Duration
+	RobotsCacheTTL     time.Duration
+	CachePruneInterval time.Duration
+	CachePruneBatch    int
 }
 
 func LoadServer() Server {
@@ -101,6 +111,34 @@ func LoadWorker() Worker {
 		LeaseDuration: getEnvDuration(
 			"LEASE_DURATION",
 			30*time.Second,
+		),
+		FetchRetries: getEnvInt(
+			"FETCH_RETRIES",
+			defaultFetchRetries,
+		),
+		FetchRetryBackoff: getEnvDuration(
+			"FETCH_RETRY_BACKOFF",
+			500*time.Millisecond,
+		),
+		HostConcurrency: getEnvInt(
+			"HOST_CONCURRENCY",
+			defaultHostConcurrency,
+		),
+		HTTPCacheTTL: getEnvDuration(
+			"HTTP_CACHE_TTL",
+			10*time.Minute,
+		),
+		RobotsCacheTTL: getEnvDuration(
+			"ROBOTS_CACHE_TTL",
+			24*time.Hour,
+		),
+		CachePruneInterval: getEnvDuration(
+			"CACHE_PRUNE_INTERVAL",
+			15*time.Minute,
+		),
+		CachePruneBatch: getEnvInt(
+			"CACHE_PRUNE_BATCH",
+			defaultCachePruneBatch,
 		),
 	}
 }
