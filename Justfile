@@ -20,3 +20,9 @@ run-indexer mode input:
 
 index-demo:
   go run ./cmd/indexer -mode urls -input ./examples/demo-urls.txt
+
+run-worker:
+  go run ./cmd/worker
+
+run-worker-indexer:
+  go run ./cmd/worker -seed-url-file ./examples/demo-urls.txt
