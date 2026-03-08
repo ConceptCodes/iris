@@ -10,7 +10,11 @@ import (
 	"net/http"
 
 	"iris/internal/constants"
+	"iris/internal/tracing"
 	"iris/pkg/models"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type Client struct {
@@ -27,6 +31,8 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
+var tracer = otel.Tracer("iris/clip")
+
 type embedTextRequest struct {
 	Text string `json:"text"`
 }
@@ -41,21 +47,39 @@ type embedResponse struct {
 }
 
 func (c *Client) EmbedText(ctx context.Context, text string) (models.Embedding, error) {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "EmbedText",
+		[]attribute.KeyValue{
+			attribute.Int("text_length", len(text)),
+		},
+	)
+	defer span.End()
+
 	reqBody := embedTextRequest{Text: text}
 	var resp embedResponse
 	if err := c.doPost(ctx, constants.PathEmbedText, reqBody, &resp); err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return nil, fmt.Errorf("embed text: %w", err)
 	}
 	return resp.Embedding, nil
 }
 
 func (c *Client) EmbedImageBytes(ctx context.Context, imageBytes []byte) (models.Embedding, error) {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "EmbedImageBytes",
+		[]attribute.KeyValue{
+			attribute.Int("image_size", len(imageBytes)),
+		},
+	)
+	defer span.End()
+
 	if len(imageBytes) > constants.MaxImageSize {
-		return nil, fmt.Errorf("image exceeds %d bytes limit", constants.MaxImageSize)
+		err := fmt.Errorf("image exceeds %d bytes limit", constants.MaxImageSize)
+		tracing.AddErrorToSpan(span, err)
+		return nil, err
 	}
 	reqBody := embedImageRequest{ImageB64: base64.StdEncoding.EncodeToString(imageBytes)}
 	var resp embedResponse
 	if err := c.doPost(ctx, constants.PathEmbedImage, reqBody, &resp); err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return nil, fmt.Errorf("embed image: %w", err)
 	}
 	return resp.Embedding, nil

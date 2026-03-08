@@ -10,7 +10,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"iris/internal/constants"
+	"iris/internal/tracing"
 	"iris/pkg/models"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type QdrantStore struct {
@@ -19,6 +23,8 @@ type QdrantStore struct {
 	points      pb.PointsClient
 	dim         uint64
 }
+
+var tracer = otel.Tracer("iris/qdrant")
 
 func NewQdrantStore(addr string, dim int, connectTimeout time.Duration) (*QdrantStore, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
@@ -69,6 +75,16 @@ func (s *QdrantStore) ensureCollection(ctx context.Context) error {
 }
 
 func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, embedding models.Embedding) (string, error) {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "Upsert",
+		[]attribute.KeyValue{
+			attribute.String("id", record.ID),
+			attribute.String("url", record.URL),
+			attribute.Int("tags_count", len(record.Tags)),
+			attribute.Int("embedding_dim", len(embedding)),
+		},
+	)
+	defer span.End()
+
 	id := record.ID
 	point := &pb.PointStruct{
 		Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: id}},
@@ -80,12 +96,22 @@ func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, emb
 		Points:         []*pb.PointStruct{point},
 	})
 	if err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return "", fmt.Errorf("upsert: %w", err)
 	}
 	return id, nil
 }
 
 func (s *QdrantStore) Search(ctx context.Context, embedding models.Embedding, topK int, filters map[string]string) ([]models.SearchResult, error) {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "Search",
+		[]attribute.KeyValue{
+			attribute.Int("top_k", topK),
+			attribute.Int("embedding_dim", len(embedding)),
+			attribute.Int("filters_count", len(filters)),
+		},
+	)
+	defer span.End()
+
 	var filter *pb.Filter
 	if len(filters) > 0 {
 		conditions := buildFilterConditions(filters)
@@ -99,6 +125,7 @@ func (s *QdrantStore) Search(ctx context.Context, embedding models.Embedding, to
 		Filter:         filter,
 	})
 	if err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return nil, fmt.Errorf("search: %w", err)
 	}
 	results := make([]models.SearchResult, 0, len(resp.GetResult()))
@@ -148,6 +175,13 @@ func (s *QdrantStore) FindIDByMeta(ctx context.Context, key, value string) (stri
 }
 
 func (s *QdrantStore) Delete(ctx context.Context, id string) error {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "Delete",
+		[]attribute.KeyValue{
+			attribute.String("id", id),
+		},
+	)
+	defer span.End()
+
 	_, err := s.points.Delete(ctx, &pb.DeletePoints{
 		CollectionName: constants.CollectionNameImages,
 		Points: &pb.PointsSelector{
@@ -160,7 +194,11 @@ func (s *QdrantStore) Delete(ctx context.Context, id string) error {
 			},
 		},
 	})
-	return err
+	if err != nil {
+		tracing.AddErrorToSpan(span, err)
+		return err
+	}
+	return nil
 }
 
 func (s *QdrantStore) GetVector(ctx context.Context, id string) (models.Embedding, error) {

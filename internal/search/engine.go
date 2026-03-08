@@ -7,9 +7,12 @@ import (
 	"reflect"
 
 	"iris/internal/constants"
+	"iris/internal/tracing"
 	"iris/pkg/models"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const defaultTopK = constants.DefaultLimit40
@@ -52,17 +55,31 @@ func NewEngine(clipClient ClipClient, qdrantStore VectorStore) Engine {
 	}
 }
 
+var tracer = otel.Tracer("iris/search")
+
 func (e *engineImpl) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "IndexFromURL",
+		[]attribute.KeyValue{
+			attribute.String("url", req.URL),
+			attribute.String("filename", req.Filename),
+			attribute.Int("tags_count", len(req.Tags)),
+		},
+	)
+	defer span.End()
+
 	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		tracing.AddErrorToSpan(span, fmt.Errorf("search engine unavailable: qdrant store not connected"))
 		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
 	}
 	if existing, ok, err := e.FindExistingID(ctx, req.Meta, req.URL); err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return "", err
 	} else if ok {
 		return existing, nil
 	}
 	embedding, err := e.clip.EmbedImageURL(ctx, req.URL)
 	if err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return "", err
 	}
 	normalize(embedding)
@@ -73,14 +90,30 @@ func (e *engineImpl) IndexFromURL(ctx context.Context, req models.IndexRequest) 
 		Tags:     req.Tags,
 		Meta:     req.Meta,
 	}
-	return e.store.Upsert(ctx, record, embedding)
+	id, err := e.store.Upsert(ctx, record, embedding)
+	if err != nil {
+		tracing.AddErrorToSpan(span, err)
+		return "", err
+	}
+	return id, nil
 }
 
 func (e *engineImpl) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "IndexFromBytes",
+		[]attribute.KeyValue{
+			attribute.Int("image_size", len(imageBytes)),
+			attribute.String("filename", record.Filename),
+			attribute.Int("tags_count", len(record.Tags)),
+		},
+	)
+	defer span.End()
+
 	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		tracing.AddErrorToSpan(span, fmt.Errorf("search engine unavailable: qdrant store not connected"))
 		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
 	}
 	if existing, ok, err := e.FindExistingID(ctx, record.Meta, ""); err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return "", err
 	} else if ok {
 		return existing, nil
@@ -90,10 +123,16 @@ func (e *engineImpl) IndexFromBytes(ctx context.Context, imageBytes []byte, reco
 	}
 	embedding, err := e.clip.EmbedImageBytes(ctx, imageBytes)
 	if err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return "", err
 	}
 	normalize(embedding)
-	return e.store.Upsert(ctx, record, embedding)
+	id, err := e.store.Upsert(ctx, record, embedding)
+	if err != nil {
+		tracing.AddErrorToSpan(span, err)
+		return "", err
+	}
+	return id, nil
 }
 
 func (e *engineImpl) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
@@ -118,7 +157,16 @@ func (e *engineImpl) ReindexFromBytes(ctx context.Context, imageBytes []byte, re
 }
 
 func (e *engineImpl) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "SearchByText",
+		[]attribute.KeyValue{
+			attribute.String("query", req.Query),
+			attribute.Int("top_k", req.TopK),
+		},
+	)
+	defer span.End()
+
 	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		tracing.AddErrorToSpan(span, fmt.Errorf("search engine unavailable: qdrant store not connected"))
 		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
 	}
 	topK := req.TopK
@@ -127,14 +175,29 @@ func (e *engineImpl) SearchByText(ctx context.Context, req models.TextSearchRequ
 	}
 	embedding, err := e.clip.EmbedText(ctx, req.Query)
 	if err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return nil, err
 	}
 	normalize(embedding)
-	return e.store.Search(ctx, embedding, topK, req.Filters)
+	results, err := e.store.Search(ctx, embedding, topK, req.Filters)
+	if err != nil {
+		tracing.AddErrorToSpan(span, err)
+		return nil, err
+	}
+	return results, nil
 }
 
 func (e *engineImpl) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
+	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "SearchByImageBytes",
+		[]attribute.KeyValue{
+			attribute.Int("top_k", topK),
+			attribute.Int("image_size", len(imageBytes)),
+		},
+	)
+	defer span.End()
+
 	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		tracing.AddErrorToSpan(span, fmt.Errorf("search engine unavailable: qdrant store not connected"))
 		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
 	}
 	if topK == 0 {
@@ -142,10 +205,16 @@ func (e *engineImpl) SearchByImageBytes(ctx context.Context, imageBytes []byte, 
 	}
 	embedding, err := e.clip.EmbedImageBytes(ctx, imageBytes)
 	if err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return nil, err
 	}
 	normalize(embedding)
-	return e.store.Search(ctx, embedding, topK, filters)
+	results, err := e.store.Search(ctx, embedding, topK, filters)
+	if err != nil {
+		tracing.AddErrorToSpan(span, err)
+		return nil, err
+	}
+	return results, nil
 }
 
 func (e *engineImpl) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error) {

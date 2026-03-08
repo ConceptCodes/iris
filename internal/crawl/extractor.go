@@ -11,6 +11,11 @@ import (
 	"strings"
 
 	"golang.org/x/net/html"
+
+	"iris/internal/tracing"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type htmlDiscovery struct {
@@ -26,6 +31,8 @@ type HTMLDiscovery struct {
 	CanonicalURL string
 	Title        string
 }
+
+var tracer = otel.Tracer("iris/crawl")
 
 func extractHTMLLinks(r io.Reader, base *url.URL, allowedDomains []string) (htmlDiscovery, error) {
 	root, err := html.Parse(r)
@@ -94,12 +101,22 @@ func extractHTMLLinks(r io.Reader, base *url.URL, allowedDomains []string) (html
 }
 
 func ExtractHTMLLinks(r io.Reader, rawBase string, allowedDomains []string) (HTMLDiscovery, error) {
+	_, span := tracing.StartSpanWithAttributes(context.Background(), tracer, "ExtractHTMLLinks",
+		[]attribute.KeyValue{
+			attribute.String("base_url", rawBase),
+			attribute.Int("allowed_domains_count", len(allowedDomains)),
+		},
+	)
+	defer span.End()
+
 	base, err := url.Parse(rawBase)
 	if err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return HTMLDiscovery{}, err
 	}
 	result, err := extractHTMLLinks(r, base, allowedDomains)
 	if err != nil {
+		tracing.AddErrorToSpan(span, err)
 		return HTMLDiscovery{}, err
 	}
 	return HTMLDiscovery{
@@ -153,6 +170,9 @@ func extractSitemapLocs(r io.Reader) ([]string, error) {
 }
 
 func ExtractSitemapLocs(r io.Reader) ([]string, error) {
+	_, span := tracing.StartSpan(context.Background(), tracer, "ExtractSitemapLocs")
+	defer span.End()
+
 	return extractSitemapLocs(r)
 }
 
