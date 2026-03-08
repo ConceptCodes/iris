@@ -47,11 +47,11 @@ What is implemented now:
 - shared ingestion pipeline in `internal/indexing`
 - local asset persistence for uploaded and local images
 - batch indexing CLI
-- worker scaffold with in-memory jobs
+- worker with memory and Postgres job backends
+- Docker Compose services for Postgres and worker
 
 What is scaffolded but not finished:
 
-- durable job storage
 - crawler discovery
 - admin endpoints for crawl/job management
 
@@ -71,9 +71,11 @@ This starts:
 
 | Service | Port | Purpose |
 |---------|------|---------|
+| `postgres` | 5432 | Durable worker job store |
 | `qdrant` | 6333, 6334 | Vector DB |
 | `clip` | 8001 | CLIP embedding sidecar |
 | `server` | 8080 | Go API and UI |
+| `worker` | n/a | Background index worker seeded from demo URLs |
 
 The Compose setup mounts `./data/assets` into the server container so uploaded and local indexed images remain renderable in the UI.
 
@@ -88,6 +90,7 @@ just run-indexer dir ./images
 just index-demo
 just run-worker
 just run-worker-indexer
+just run-worker-postgres
 ```
 
 ## Search And Index APIs
@@ -159,15 +162,16 @@ go run ./cmd/indexer -mode urls -input ./examples/demo-urls.txt
 
 Directory mode reads local files directly, stores them under `ASSET_DIR`, and indexes the resulting asset URLs so results can render in the browser.
 
-## Worker Scaffold
+## Worker
 
-The Phase 1 worker is present, but it is still a scaffold:
+The Phase 1 worker is present and supports two backends today:
 
 ```bash
 go run ./cmd/worker
+JOB_BACKEND=postgres go run ./cmd/worker -seed-url-file ./examples/demo-urls.txt
 ```
 
-For development, it can seed in-memory jobs from a URL file or local directory:
+For development, it can seed jobs from a URL file or local directory:
 
 ```bash
 go run ./cmd/worker -seed-url-file ./examples/demo-urls.txt
@@ -176,15 +180,13 @@ go run ./cmd/worker -seed-dir ./images
 
 What it does today:
 
-- leases jobs from an in-memory queue
+- leases jobs from memory or Postgres
 - handles `fetch_image` and `index_local_file`
 - reuses `internal/indexing`
 
 What it does not do yet:
 
-- persist jobs across restarts
 - crawl remote pages
-- use Postgres-backed jobs
 - expose admin job APIs
 
 ## Configuration
@@ -199,6 +201,7 @@ What it does not do yet:
 | `ASSET_DIR` | `./data/assets` | Filesystem path for local assets |
 | `WORKER_MODE` | `indexer` | Worker mode: `indexer` or `crawler` |
 | `JOB_BACKEND` | `memory` | Worker job backend |
+| `JOB_STORE_DSN` | `postgres://iris:iris@localhost:5432/iris?sslmode=disable` | Postgres DSN for durable jobs |
 | `JOB_POLL_INTERVAL` | `1s` | Worker idle poll interval |
 | `LEASE_DURATION` | `30s` | Worker lease duration |
 
@@ -232,7 +235,8 @@ What it does not do yet:
 │   │   └── pipeline.go       Shared ingestion pipeline
 │   ├── jobs/
 │   │   ├── types.go          Job contracts
-│   │   └── memory.go         In-memory job backend
+│   │   ├── memory.go         In-memory job backend
+│   │   └── postgres.go       Postgres job backend
 │   ├── search/
 │   │   └── engine.go         Search orchestration
 │   └── store/

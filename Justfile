@@ -26,3 +26,6 @@ run-worker:
 
 run-worker-indexer:
   go run ./cmd/worker -seed-url-file ./examples/demo-urls.txt
+
+run-worker-postgres:
+  JOB_BACKEND=postgres go run ./cmd/worker -seed-url-file ./examples/demo-urls.txt
