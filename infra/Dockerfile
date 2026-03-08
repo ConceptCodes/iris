@@ -1,5 +1,6 @@
+ARG PYTHON_VERSION=3.11
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -32,7 +33,6 @@ ENTRYPOINT ["/worker"]
 # For GPU: docker build --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu121 ./clip_service
 # For Apple Silicon: the MPS backend is included in standard torch, no special index needed
 
-ARG PYTHON_VERSION=3.11
 FROM python:${PYTHON_VERSION}-slim AS clip
 
 # Build arg for PyTorch index (cpu, cu118, cu121, etc.)
@@ -44,6 +44,10 @@ ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 WORKDIR /app
 
 # Install dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
     fastapi>=0.109.0 \
     uvicorn[standard]>=0.27.0 \
@@ -67,4 +71,4 @@ EXPOSE 8001
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8001/health || exit 1
 
-ENTRYPOINT ["python", "main.py", "--model", "$MODEL", "--host", "0.0.0.0", "--port", "8001"]
+ENTRYPOINT ["sh", "-c", "python main.py --model $MODEL --host 0.0.0.0 --port 8001"]

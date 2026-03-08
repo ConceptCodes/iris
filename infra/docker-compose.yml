@@ -23,11 +23,6 @@ services:
       - "6334:6334"   # gRPC API  (used by the Go service)
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   # ── CLIP embedding sidecar ─────────────────────────────────────────────────
   clip:
@@ -69,7 +64,7 @@ services:
       postgres:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
       clip:
         condition: service_healthy
 
@@ -88,7 +83,7 @@ services:
       postgres:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
       clip:
         condition: service_healthy
 
