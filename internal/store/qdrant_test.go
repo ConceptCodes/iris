@@ -7,6 +7,7 @@ import (
 
 	pb "github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
+	"iris/internal/constants"
 	"iris/pkg/models"
 )
 
@@ -58,7 +59,7 @@ func TestQdrantStore_ensureCollection(t *testing.T) {
 		mockC := &mockCollectionsClient{
 			listResp: &pb.ListCollectionsResponse{
 				Collections: []*pb.CollectionDescription{
-					{Name: collectionName},
+					{Name: constants.CollectionNameImages},
 				},
 			},
 		}

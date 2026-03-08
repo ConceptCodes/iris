@@ -9,10 +9,9 @@ import (
 	pb "github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"iris/internal/constants"
 	"iris/pkg/models"
 )
-
-const collectionName = "images"
 
 type QdrantStore struct {
 	conn        *grpc.ClientConn
@@ -50,12 +49,12 @@ func (s *QdrantStore) ensureCollection(ctx context.Context) error {
 		return fmt.Errorf("list collections: %w", err)
 	}
 	for _, c := range resp.GetCollections() {
-		if c.Name == collectionName {
+		if c.Name == constants.CollectionNameImages {
 			return nil
 		}
 	}
 	_, err = s.collections.Create(ctx, &pb.CreateCollection{
-		CollectionName: collectionName,
+		CollectionName: constants.CollectionNameImages,
 		VectorsConfig: &pb.VectorsConfig{Config: &pb.VectorsConfig_Params{
 			Params: &pb.VectorParams{
 				Size:     s.dim,
@@ -77,7 +76,7 @@ func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, emb
 		Payload: s.recordToPayload(record),
 	}
 	_, err := s.points.Upsert(ctx, &pb.UpsertPoints{
-		CollectionName: collectionName,
+		CollectionName: constants.CollectionNameImages,
 		Points:         []*pb.PointStruct{point},
 	})
 	if err != nil {
@@ -93,7 +92,7 @@ func (s *QdrantStore) Search(ctx context.Context, embedding models.Embedding, to
 		filter = &pb.Filter{Must: conditions}
 	}
 	resp, err := s.points.Search(ctx, &pb.SearchPoints{
-		CollectionName: collectionName,
+		CollectionName: constants.CollectionNameImages,
 		Vector:         embedding,
 		Limit:          uint64(topK),
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
@@ -122,7 +121,7 @@ func (s *QdrantStore) FindIDByMeta(ctx context.Context, key, value string) (stri
 	filter := &pb.Filter{Must: conditions}
 	limit := uint32(1)
 	resp, err := s.points.Scroll(ctx, &pb.ScrollPoints{
-		CollectionName: collectionName,
+		CollectionName: constants.CollectionNameImages,
 		Filter:         filter,
 		Limit:          &limit,
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
@@ -150,7 +149,7 @@ func (s *QdrantStore) FindIDByMeta(ctx context.Context, key, value string) (stri
 
 func (s *QdrantStore) Delete(ctx context.Context, id string) error {
 	_, err := s.points.Delete(ctx, &pb.DeletePoints{
-		CollectionName: collectionName,
+		CollectionName: constants.CollectionNameImages,
 		Points: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Points{
 				Points: &pb.PointsIdsList{
@@ -166,7 +165,7 @@ func (s *QdrantStore) Delete(ctx context.Context, id string) error {
 
 func (s *QdrantStore) GetVector(ctx context.Context, id string) (models.Embedding, error) {
 	resp, err := s.points.Get(ctx, &pb.GetPoints{
-		CollectionName: collectionName,
+		CollectionName: constants.CollectionNameImages,
 		Ids: []*pb.PointId{
 			{PointIdOptions: &pb.PointId_Uuid{Uuid: id}},
 		},
@@ -191,19 +190,19 @@ func (s *QdrantStore) GetVector(ctx context.Context, id string) (models.Embeddin
 
 func (s *QdrantStore) recordToPayload(record models.ImageRecord) map[string]*pb.Value {
 	payload := map[string]*pb.Value{
-		"id":       {Kind: &pb.Value_StringValue{StringValue: record.ID}},
-		"url":      {Kind: &pb.Value_StringValue{StringValue: record.URL}},
-		"filename": {Kind: &pb.Value_StringValue{StringValue: record.Filename}},
+		constants.PayloadFieldID:       {Kind: &pb.Value_StringValue{StringValue: record.ID}},
+		constants.PayloadFieldURL:      {Kind: &pb.Value_StringValue{StringValue: record.URL}},
+		constants.PayloadFieldFilename: {Kind: &pb.Value_StringValue{StringValue: record.Filename}},
 	}
 	if len(record.Tags) > 0 {
 		tags := make([]*pb.Value, len(record.Tags))
 		for i, t := range record.Tags {
 			tags[i] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: t}}
 		}
-		payload["tags"] = &pb.Value{Kind: &pb.Value_ListValue{ListValue: &pb.ListValue{Values: tags}}}
+		payload[constants.PayloadFieldTags] = &pb.Value{Kind: &pb.Value_ListValue{ListValue: &pb.ListValue{Values: tags}}}
 	}
 	for k, v := range record.Meta {
-		payload["meta_"+k] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: v}}
+		payload[constants.PayloadFieldMetaPrefix+k] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: v}}
 	}
 	return payload
 }
@@ -212,22 +211,22 @@ func (s *QdrantStore) payloadToRecord(payload map[string]*pb.Value) models.Image
 	record := models.ImageRecord{
 		Meta: make(map[string]string),
 	}
-	if v, ok := payload["id"]; ok {
+	if v, ok := payload[constants.PayloadFieldID]; ok {
 		if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
 			record.ID = sv.StringValue
 		}
 	}
-	if v, ok := payload["url"]; ok {
+	if v, ok := payload[constants.PayloadFieldURL]; ok {
 		if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
 			record.URL = sv.StringValue
 		}
 	}
-	if v, ok := payload["filename"]; ok {
+	if v, ok := payload[constants.PayloadFieldFilename]; ok {
 		if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
 			record.Filename = sv.StringValue
 		}
 	}
-	if v, ok := payload["tags"]; ok {
+	if v, ok := payload[constants.PayloadFieldTags]; ok {
 		if lv, ok := v.Kind.(*pb.Value_ListValue); ok {
 			for _, tag := range lv.ListValue.Values {
 				if sv, ok := tag.Kind.(*pb.Value_StringValue); ok {
@@ -237,9 +236,9 @@ func (s *QdrantStore) payloadToRecord(payload map[string]*pb.Value) models.Image
 		}
 	}
 	for k, v := range payload {
-		if len(k) > 5 && k[:5] == "meta_" {
+		if len(k) > len(constants.PayloadFieldMetaPrefix) && k[:len(constants.PayloadFieldMetaPrefix)] == constants.PayloadFieldMetaPrefix {
 			if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
-				record.Meta[k[5:]] = sv.StringValue
+				record.Meta[k[len(constants.PayloadFieldMetaPrefix):]] = sv.StringValue
 			}
 		}
 	}
@@ -265,7 +264,7 @@ func buildFilterConditions(filters map[string]string) []*pb.Condition {
 
 func (s *QdrantStore) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
 	if limit == 0 {
-		limit = 100
+		limit = constants.DefaultLimit100
 	}
 	var filter *pb.Filter
 	if len(filters) > 0 {
@@ -273,7 +272,7 @@ func (s *QdrantStore) ListImages(ctx context.Context, filters map[string]string,
 		filter = &pb.Filter{Must: conditions}
 	}
 	resp, err := s.points.Scroll(ctx, &pb.ScrollPoints{
-		CollectionName: collectionName,
+		CollectionName: constants.CollectionNameImages,
 		Filter:         filter,
 		Limit:          &limit,
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
