@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"iris/config"
 	"iris/internal/assets"
 	"iris/internal/clip"
+	"iris/internal/indexing"
 	"iris/internal/search"
 	"iris/internal/store"
 	"iris/pkg/models"
@@ -58,7 +58,7 @@ func main() {
 	defer qdrantStore.Close()
 
 	engine := search.NewEngine(clipClient, qdrantStore)
-	assetStore := assets.NewStore(cfg.AssetDir)
+	pipeline := indexing.NewPipeline(engine, assets.NewStore(cfg.AssetDir))
 
 	var jobs []string
 	switch *mode {
@@ -80,7 +80,7 @@ func main() {
 		go func() {
 			for job := range jobsCh {
 				start := time.Now()
-				err := indexJob(context.Background(), engine, assetStore, *mode, job)
+				err := indexJob(context.Background(), pipeline, *mode, job)
 				if err != nil {
 					slog.Error("index failed", "job", job, "error", err)
 					failed.Add(1)
@@ -122,44 +122,17 @@ func collectDirJobs(dir string) []string {
 	return jobs
 }
 
-func indexJob(ctx context.Context, engine search.Engine, assetStore *assets.Store, mode, job string) error {
+func indexJob(ctx context.Context, pipeline *indexing.Pipeline, mode, job string) error {
 	switch mode {
 	case "dir":
-		return indexLocalFile(ctx, engine, assetStore, job)
+		_, err := pipeline.IndexLocalFile(ctx, job)
+		return err
 	case "urls":
-		_, err := engine.IndexFromURL(ctx, models.IndexRequest{URL: job})
+		_, err := pipeline.IndexFromURL(ctx, models.IndexRequest{URL: job})
 		return err
 	default:
 		return fmt.Errorf("unsupported mode: %s", mode)
 	}
-}
-
-func indexLocalFile(ctx context.Context, engine search.Engine, assetStore *assets.Store, path string) error {
-	imageBytes, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read local image: %w", err)
-	}
-
-	id := uuid.New().String()
-	filename := filepath.Base(path)
-	record := models.ImageRecord{
-		ID:       id,
-		Filename: filename,
-		Meta: map[string]string{
-			"source":      "local",
-			"source_path": path,
-		},
-	}
-	if assetStore != nil {
-		assetURL, err := assetStore.Save(id, filename, imageBytes)
-		if err != nil {
-			return fmt.Errorf("store local image: %w", err)
-		}
-		record.URL = assetURL
-	}
-
-	_, err = engine.IndexFromBytes(ctx, imageBytes, record)
-	return err
 }
 
 func collectURLJobs(path string) []string {
