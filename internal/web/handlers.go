@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/a-h/templ"
+	"iris/internal/constants"
 	"iris/internal/search"
 	"iris/pkg/models"
 	"iris/web/templates"
@@ -31,10 +32,10 @@ func (h *Handlers) SearchResults(w http.ResponseWriter, r *http.Request) {
 		page = 1
 	}
 
-	topK := 40
+	topK := constants.DefaultLimit40
 	filters := map[string]string{}
 	if filterType != "" {
-		filters["meta_type"] = filterType
+		filters[constants.PayloadFieldMetaPrefix+constants.MetaKeyContentType] = filterType
 	}
 
 	results, err := h.engine.SearchByText(r.Context(), models.TextSearchRequest{
@@ -43,7 +44,7 @@ func (h *Handlers) SearchResults(w http.ResponseWriter, r *http.Request) {
 		Filters: filters,
 	})
 	if err != nil {
-		if r.Header.Get("HX-Request") == "true" {
+		if r.Header.Get(constants.HeaderHXRequest) == "true" {
 			templ.Handler(templates.EmptyState(query, "error")).ServeHTTP(w, r)
 			return
 		}
@@ -51,7 +52,7 @@ func (h *Handlers) SearchResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("HX-Request") == "true" {
+	if r.Header.Get(constants.HeaderHXRequest) == "true" {
 		for i := range results {
 			templ.Handler(templates.ImageCard(results[i], (page-1)*topK+i)).ServeHTTP(w, r)
 		}
@@ -70,7 +71,7 @@ func (h *Handlers) ImageDetail(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	results, err := h.engine.GetSimilar(r.Context(), id, 2)
 	if err != nil || len(results) == 0 {
-		http.Error(w, "not found", http.StatusNotFound)
+		http.Error(w, constants.MessageNotFound, http.StatusNotFound)
 		return
 	}
 	templ.Handler(templates.DetailPanel(results[0])).ServeHTTP(w, r)
@@ -95,27 +96,27 @@ func (h *Handlers) RelatedImages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) ReverseImageSearch(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		http.Error(w, "file too large", http.StatusBadRequest)
+	if err := r.ParseMultipartForm(constants.MaxImageSize); err != nil {
+		http.Error(w, constants.MessageFileTooLarge, http.StatusBadRequest)
 		return
 	}
 	file, header, err := r.FormFile("image")
 	if err != nil {
-		http.Error(w, "image required", http.StatusBadRequest)
+		http.Error(w, constants.MessageImageRequired, http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
 	buf := make([]byte, header.Size)
 	if _, err := file.Read(buf); err != nil {
-		http.Error(w, "failed to read file", http.StatusInternalServerError)
+		http.Error(w, constants.MsgFailedToReadFile, http.StatusInternalServerError)
 		return
 	}
-	results, err := h.engine.SearchByImageBytes(r.Context(), buf, 40, nil)
+	results, err := h.engine.SearchByImageBytes(r.Context(), buf, constants.DefaultLimit40, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if r.Header.Get("HX-Request") == "true" {
+	if r.Header.Get(constants.HeaderHXRequest) == "true" {
 		templ.Handler(templates.ResultsGrid(results, "", 1)).ServeHTTP(w, r)
 		return
 	}
@@ -125,15 +126,15 @@ func (h *Handlers) ReverseImageSearch(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) ReverseImageSearchURL(w http.ResponseWriter, r *http.Request) {
 	url := r.FormValue("url")
 	if url == "" {
-		http.Error(w, "url required", http.StatusBadRequest)
+		http.Error(w, constants.ErrorMsgURLRequired, http.StatusBadRequest)
 		return
 	}
-	results, err := h.engine.SearchByImageURL(r.Context(), url, 40, nil)
+	results, err := h.engine.SearchByImageURL(r.Context(), url, constants.DefaultLimit40, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if r.Header.Get("HX-Request") == "true" {
+	if r.Header.Get(constants.HeaderHXRequest) == "true" {
 		templ.Handler(templates.ResultsGrid(results, url, 1)).ServeHTTP(w, r)
 		return
 	}

@@ -3,12 +3,12 @@ package templates
 import "iris/pkg/models"
 
 templ LandingPage() {
-	@Layout("Image Search", "") {
+	@Layout("Iris Search", "") {
 		<div class="min-h-screen flex flex-col items-center justify-center px-4">
 			<div class="mb-8">
 				<h1 class="text-[92px] font-normal">
-					<span class="text-[#4285f4]">G</span><span class="text-[#ea4335]">o</span><span class="text-[#fbbc05]">o</span><span class="text-[#4285f4]">g</span><span class="text-[#34a853]">l</span><span class="text-[#ea4335]">e</span>
-					<span class="ml-3 text-[#4285f4]">Images</span>
+					<span class="text-[#4285f4]">I</span><span class="text-[#ea4335]">r</span><span class="text-[#fbbc05]">i</span><span class="text-[#4285f4]">s</span>
+					<span class="ml-3 text-[#4285f4]">Search</span>
 				</h1>
 			</div>
 			<div class="w-full max-w-[584px]">
@@ -19,13 +19,13 @@ templ LandingPage() {
 }
 
 templ SearchResultsPage(results []models.SearchResult, query string, filterType string, page int) {
-	@Layout(query+" - Image Search", query) {
+	@Layout(query+" - Iris Search", query) {
 		<div class="sticky top-0 z-30 bg-white border-b border-gray-200">
 			<div class="flex items-center h-14 px-4 lg:px-6">
 				<a href="/" class="flex items-center mr-8">
 					<span class="text-xl font-normal">
-						<span class="text-[#4285f4]">G</span><span class="text-[#ea4335]">o</span><span class="text-[#fbbc05]">o</span><span class="text-[#4285f4]">g</span><span class="text-[#34a853]">l</span><span class="text-[#ea4335]">e</span>
-						<span class="ml-2 text-[#4285f4]">Images</span>
+						<span class="text-[#4285f4]">Iris</span>
+						<span class="ml-2 text-[#4285f4]">Search</span>
 					</span>
 				</a>
 				<div class="flex-1 max-w-[640px]">
@@ -41,13 +41,13 @@ templ SearchResultsPage(results []models.SearchResult, query string, filterType 
 }
 
 templ ErrorPage(query string, filterType string) {
-	@Layout("Image Search - Error", query) {
+	@Layout("Iris Search - Error", query) {
 		<div class="sticky top-0 z-30 bg-white border-b border-gray-200">
 			<div class="flex items-center h-14 px-4 lg:px-6">
 				<a href="/" class="flex items-center mr-8">
 					<span class="text-xl font-normal">
-						<span class="text-[#4285f4]">G</span><span class="text-[#ea4335]">o</span><span class="text-[#fbbc05]">o</span><span class="text-[#4285f4]">g</span><span class="text-[#34a853]">l</span><span class="text-[#ea4335]">e</span>
-						<span class="ml-2 text-[#4285f4]">Images</span>
+						<span class="text-[#4285f4]">Iris</span>
+						<span class="ml-2 text-[#4285f4]">Search</span>
 					</span>
 				</a>
 				<div class="flex-1 max-w-[640px]">
@@ -63,13 +63,13 @@ templ ErrorPage(query string, filterType string) {
 }
 
 templ NoResultsPage(query string, filterType string) {
-	@Layout(query+" - Image Search", query) {
+	@Layout(query+" - Iris Search", query) {
 		<div class="sticky top-0 z-30 bg-white border-b border-gray-200">
 			<div class="flex items-center h-14 px-4 lg:px-6">
 				<a href="/" class="flex items-center mr-8">
 					<span class="text-xl font-normal">
-						<span class="text-[#4285f4]">G</span><span class="text-[#ea4335]">o</span><span class="text-[#fbbc05]">o</span><span class="text-[#4285f4]">g</span><span class="text-[#34a853]">l</span><span class="text-[#ea4335]">e</span>
-						<span class="ml-2 text-[#4285f4]">Images</span>
+						<span class="text-[#4285f4]">Iris</span>
+						<span class="ml-2 text-[#4285f4]">Search</span>
 					</span>
 				</a>
 				<div class="flex-1 max-w-[640px]">
