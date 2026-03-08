@@ -6,21 +6,20 @@ import (
 	"strings"
 	"time"
 
-	"iris/internal/assets"
+	"iris/internal/indexing"
 	"iris/internal/search"
 	"iris/pkg/models"
-	"github.com/google/uuid"
 )
 
 const maxUploadSize = 20 << 20
 
 type Handler struct {
-	engine     search.Engine
-	assetStore *assets.Store
+	engine  search.Engine
+	indexer *indexing.Pipeline
 }
 
-func NewHandler(engine search.Engine, assetStore *assets.Store) *Handler {
-	return &Handler{engine: engine, assetStore: assetStore}
+func NewHandler(engine search.Engine, indexer *indexing.Pipeline) *Handler {
+	return &Handler{engine: engine, indexer: indexer}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +36,7 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "url is required")
 		return
 	}
-	id, err := h.engine.IndexFromURL(r.Context(), req)
+	id, err := h.indexer.IndexFromURL(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -75,21 +74,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 			meta[strings.TrimPrefix(key, "meta_")] = values[0]
 		}
 	}
-	record := models.ImageRecord{
-		ID:       uuid.New().String(),
-		Filename: filename,
-		Tags:     tags,
-		Meta:     meta,
-	}
-	if h.assetStore != nil {
-		assetURL, err := h.assetStore.Save(record.ID, filename, buf)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to store image")
-			return
-		}
-		record.URL = assetURL
-	}
-	id, err := h.engine.IndexFromBytes(r.Context(), buf, record)
+	id, err := h.indexer.IndexUploadedBytes(r.Context(), buf, filename, tags, meta)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -4,12 +4,13 @@ import (
 	"net/http"
 	"time"
 
-	"iris/internal/assets"
-	"iris/internal/search"
-	"iris/internal/web"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"iris/internal/assets"
+	"iris/internal/indexing"
+	"iris/internal/search"
+	"iris/internal/web"
 )
 
 func NewRouter(engine search.Engine, assetDir string) http.Handler {
@@ -29,7 +30,8 @@ func NewRouter(engine search.Engine, assetDir string) http.Handler {
 	}))
 
 	assetStore := assets.NewStore(assetDir)
-	h := NewHandler(engine, assetStore)
+	indexer := indexing.NewPipeline(engine, assetStore)
+	h := NewHandler(engine, indexer)
 	wh := web.NewHandlers(engine)
 
 	r.Get("/health", h.Health)
