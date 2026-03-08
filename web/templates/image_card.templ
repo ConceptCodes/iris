@@ -1,0 +1,32 @@
+package templates
+
+import "github.com/davidojo/google-images/pkg/models"
+import "strconv"
+
+templ ImageCard(result models.SearchResult, index int) {
+	<div
+		class="image-card group cursor-pointer relative"
+		data-id={ result.Record.ID }
+		data-index={ strconv.Itoa(index) }
+		tabindex="0"
+		hx-get={ "/image/" + result.Record.ID }
+		hx-target="#detail-panel"
+		hx-swap="innerHTML"
+		onclick="openPanel(this)"
+		onkeydown="if(event.key==='Enter')openPanel(this)"
+	>
+		<img
+			src={ result.Record.URL }
+			alt={ result.Record.Filename }
+			loading="lazy"
+			class="w-full object-cover rounded"
+		/>
+		<div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-150 rounded">
+			<div class="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+				if result.Record.Filename != "" {
+					<p class="text-white text-xs font-medium truncate drop-shadow">{ result.Record.Filename }</p>
+				}
+			</div>
+		</div>
+	</div>
+}

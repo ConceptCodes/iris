@@ -1,0 +1,23 @@
+package templates
+
+import "github.com/davidojo/google-images/pkg/models"
+import "strconv"
+
+templ ResultsGrid(results []models.SearchResult, query string, page int) {
+	<div id="results-grid" class="image-grid max-w-[1520px] mx-auto px-4 py-4">
+		for i, result := range results {
+			@ImageCard(result, i)
+		}
+		if len(results) > 0 && page > 0 {
+			<div
+				hx-get={ templ.URL("/search?q=" + query + "&page=" + strconv.Itoa(page+1)) }
+				hx-trigger="revealed"
+				hx-target="#results-grid"
+				hx-swap="beforeend"
+				class="col-span-full py-8 text-center text-gray-400"
+			>
+				Loading more...
+			</div>
+		}
+	</div>
+}

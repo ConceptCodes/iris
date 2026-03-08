@@ -1,0 +1,35 @@
+package templates
+
+var filterChips = []struct {
+	Label string
+	Value string
+}{
+	{"All", ""},
+	{"Shopping", "shopping"},
+	{"News", "news"},
+	{"Videos", "videos"},
+	{"Faces", "faces"},
+	{"Photo", "photo"},
+	{"Clip art", "clipart"},
+	{"Line drawing", "linedrawing"},
+	{"Animated", "animated"},
+}
+
+func chipClass(active bool) string {
+	if active {
+		return "rounded-full px-3 py-1 text-sm bg-gray-800 text-white"
+	}
+	return "rounded-full px-3 py-1 text-sm bg-gray-100 text-gray-700 hover:bg-gray-200"
+}
+
+templ FilterChips(query string, active string) {
+	<div class="overflow-x-auto no-scrollbar border-b border-gray-200 bg-white">
+		<div class="flex gap-2 px-4 py-2 whitespace-nowrap max-w-[1520px] mx-auto">
+			for _, chip := range filterChips {
+				<a href={ templ.URL("/search?q=" + query + "&type=" + chip.Value) } class={ chipClass(active == chip.Value) }>
+					{ chip.Label }
+				</a>
+			}
+		</div>
+	</div>
+}

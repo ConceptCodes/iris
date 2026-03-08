@@ -1,0 +1,65 @@
+package templates
+
+import "github.com/davidojo/google-images/pkg/models"
+import "fmt"
+
+templ DetailPanel(result models.SearchResult) {
+	<div class="p-4">
+		<div class="flex justify-between items-start mb-4">
+			<button onclick="closePanel()" class="p-2 hover:bg-gray-100 rounded-full">
+				<svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+				</svg>
+			</button>
+		</div>
+		<div class="mb-4 flex justify-center">
+			<img
+				src={ result.Record.URL }
+				alt={ result.Record.Filename }
+				class="max-h-96 object-contain rounded"
+			/>
+		</div>
+		<div class="flex gap-2 mb-4">
+			<a
+				href={ result.Record.URL }
+				target="_blank"
+				class="flex-1 px-4 py-2 border border-[#1a73e8] text-[#1a73e8] text-sm font-medium rounded-full text-center hover:bg-blue-50 transition-colors"
+			>
+				Visit
+			</a>
+			<a
+				href={ result.Record.URL }
+				target="_blank"
+				rel="noopener"
+				class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-full text-center hover:bg-gray-200 transition-colors"
+			>
+				View full size
+			</a>
+		</div>
+		<div class="border-t border-gray-200 pt-4">
+			if result.Record.Filename != "" {
+				<h3 class="font-medium text-gray-900 mb-1 truncate">{ result.Record.Filename }</h3>
+			}
+			<p class="text-sm text-gray-500 truncate mb-2">{ result.Record.URL }</p>
+			<p class="text-sm text-gray-600 mb-2">Score: { fmt.Sprintf("%.2f", result.Score) }</p>
+			if len(result.Record.Tags) > 0 {
+				<div class="flex flex-wrap gap-1 mb-2">
+					for _, tag := range result.Record.Tags {
+						<span class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">{ tag }</span>
+					}
+				</div>
+			}
+		</div>
+		<div class="border-t border-gray-200 pt-4 mt-4">
+			<h4 class="text-sm font-medium text-gray-700 mb-3">Related images</h4>
+			<div
+				id={ "related-" + result.Record.ID }
+				hx-get={ "/related/" + result.Record.ID }
+				hx-trigger="load"
+				class="grid grid-cols-3 gap-2"
+			>
+				<div class="col-span-3 py-4 text-center text-gray-400 text-sm">Loading...</div>
+			</div>
+		</div>
+	</div>
+}

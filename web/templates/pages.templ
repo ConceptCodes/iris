@@ -1,0 +1,85 @@
+package templates
+
+import "github.com/davidojo/google-images/pkg/models"
+
+templ LandingPage() {
+	@Layout("Image Search", "") {
+		<div class="min-h-screen flex flex-col items-center justify-center px-4">
+			<div class="mb-8">
+				<h1 class="text-[92px] font-normal">
+					<span class="text-[#4285f4]">G</span><span class="text-[#ea4335]">o</span><span class="text-[#fbbc05]">o</span><span class="text-[#4285f4]">g</span><span class="text-[#34a853]">l</span><span class="text-[#ea4335]">e</span>
+					<span class="ml-3 text-[#4285f4]">Images</span>
+				</h1>
+			</div>
+			<div class="w-full max-w-[584px]">
+				@SearchBar("", "hero")
+			</div>
+		</div>
+	}
+}
+
+templ SearchResultsPage(results []models.SearchResult, query string, filterType string, page int) {
+	@Layout(query+" - Image Search", query) {
+		<div class="sticky top-0 z-30 bg-white border-b border-gray-200">
+			<div class="flex items-center h-14 px-4 lg:px-6">
+				<a href="/" class="flex items-center mr-8">
+					<span class="text-xl font-normal">
+						<span class="text-[#4285f4]">G</span><span class="text-[#ea4335]">o</span><span class="text-[#fbbc05]">o</span><span class="text-[#4285f4]">g</span><span class="text-[#34a853]">l</span><span class="text-[#ea4335]">e</span>
+						<span class="ml-2 text-[#4285f4]">Images</span>
+					</span>
+				</a>
+				<div class="flex-1 max-w-[640px]">
+					@SearchBar(query, "header")
+				</div>
+			</div>
+			@FilterChips(query, filterType)
+		</div>
+		<main class="pt-4">
+			@ResultsGrid(results, query, page)
+		</main>
+	}
+}
+
+templ ErrorPage(query string, filterType string) {
+	@Layout("Image Search - Error", query) {
+		<div class="sticky top-0 z-30 bg-white border-b border-gray-200">
+			<div class="flex items-center h-14 px-4 lg:px-6">
+				<a href="/" class="flex items-center mr-8">
+					<span class="text-xl font-normal">
+						<span class="text-[#4285f4]">G</span><span class="text-[#ea4335]">o</span><span class="text-[#fbbc05]">o</span><span class="text-[#4285f4]">g</span><span class="text-[#34a853]">l</span><span class="text-[#ea4335]">e</span>
+						<span class="ml-2 text-[#4285f4]">Images</span>
+					</span>
+				</a>
+				<div class="flex-1 max-w-[640px]">
+					@SearchBar(query, "header")
+				</div>
+			</div>
+			@FilterChips(query, filterType)
+		</div>
+		<main class="pt-4">
+			@EmptyState(query, "error")
+		</main>
+	}
+}
+
+templ NoResultsPage(query string, filterType string) {
+	@Layout(query+" - Image Search", query) {
+		<div class="sticky top-0 z-30 bg-white border-b border-gray-200">
+			<div class="flex items-center h-14 px-4 lg:px-6">
+				<a href="/" class="flex items-center mr-8">
+					<span class="text-xl font-normal">
+						<span class="text-[#4285f4]">G</span><span class="text-[#ea4335]">o</span><span class="text-[#fbbc05]">o</span><span class="text-[#4285f4]">g</span><span class="text-[#34a853]">l</span><span class="text-[#ea4335]">e</span>
+						<span class="ml-2 text-[#4285f4]">Images</span>
+					</span>
+				</a>
+				<div class="flex-1 max-w-[640px]">
+					@SearchBar(query, "header")
+				</div>
+			</div>
+			@FilterChips(query, filterType)
+		</div>
+		<main class="pt-4">
+			@EmptyState(query, "no_results")
+		</main>
+	}
+}

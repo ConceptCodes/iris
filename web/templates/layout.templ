@@ -1,0 +1,35 @@
+package templates
+
+templ Layout(title string, query string) {
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+		if query != "" {
+			<title>{ query } - Image Search</title>
+		} else {
+			<title>Image Search</title>
+		}
+		<script src="https://cdn.tailwindcss.com"></script>
+		<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+		<link rel="stylesheet" href="/static/app.css"/>
+	</head>
+	<body class="bg-white min-h-screen">
+		<div id="upload-modal" class="fixed inset-0 z-50 hidden">
+			<div class="absolute inset-0 bg-black bg-opacity-40" onclick="closeUploadModal()"></div>
+			<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-2xl w-[560px] max-w-[95vw]">
+				@UploadModal()
+			</div>
+		</div>
+		<div
+			id="detail-panel-container"
+			class="fixed top-[100px] right-0 bottom-0 w-[430px] bg-white border-l border-gray-200 translate-x-full overflow-y-auto z-40"
+		>
+			<div id="detail-panel"></div>
+		</div>
+		{ children... }
+		<script src="/static/app.js"></script>
+	</body>
+	</html>
+}
