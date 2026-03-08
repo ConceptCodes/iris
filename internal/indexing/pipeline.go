@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,7 +64,7 @@ func (p *Pipeline) IndexFromURL(ctx context.Context, req models.IndexRequest) (s
 	if req.URL == "" {
 		return "", fmt.Errorf("url is required")
 	}
-	imageBytes, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes)
+	imageBytes, mimeType, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes)
 	if err != nil {
 		return "", err
 	}
@@ -77,6 +78,9 @@ func (p *Pipeline) IndexFromURL(ctx context.Context, req models.IndexRequest) (s
 		record.Meta = map[string]string{}
 	}
 	record.Meta["origin_url"] = req.URL
+	if mimeType != "" {
+		record.Meta["mime_type"] = mimeType
+	}
 	return p.indexBytes(ctx, imageBytes, record, false)
 }
 
@@ -111,7 +115,7 @@ func (p *Pipeline) ReindexFromURL(ctx context.Context, imageURL string, record m
 	if imageURL == "" {
 		return "", fmt.Errorf("url is required")
 	}
-	imageBytes, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes)
+	imageBytes, mimeType, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes)
 	if err != nil {
 		return "", err
 	}
@@ -119,6 +123,9 @@ func (p *Pipeline) ReindexFromURL(ctx context.Context, imageURL string, record m
 		record.Meta = map[string]string{}
 	}
 	record.Meta["origin_url"] = imageURL
+	if mimeType != "" {
+		record.Meta["mime_type"] = mimeType
+	}
 	return p.indexBytes(ctx, imageBytes, record, true)
 }
 
@@ -134,6 +141,12 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 			record.Meta["source_url"] = original
 		} else if record.URL != "" {
 			record.Meta["source_url"] = record.URL
+		}
+	}
+	// Extract source_domain from source_url if not already set
+	if record.Meta["source_domain"] == "" && record.Meta["source_url"] != "" {
+		if u, err := url.Parse(record.Meta["source_url"]); err == nil {
+			record.Meta["source_domain"] = u.Hostname()
 		}
 	}
 	if p.assetStore != nil {
@@ -156,7 +169,7 @@ const maxFetchBytes = 20 << 20
 
 var fetchHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
-func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int) ([]byte, error) {
+func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int) ([]byte, string, error) {
 	if client == nil {
 		client = fetchHTTPClient
 	}
@@ -165,34 +178,36 @@ func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, ma
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch image url: %w", err)
+		return nil, "", fmt.Errorf("fetch image url: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch image url: status %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("fetch image url: status %d", resp.StatusCode)
 	}
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	if contentType != "" && !strings.HasPrefix(contentType, "image/") {
-		return nil, fmt.Errorf("unsupported content type: %s", contentType)
+		return nil, "", fmt.Errorf("unsupported content type: %s", contentType)
 	}
 	limited := io.LimitReader(resp.Body, int64(maxBytes+1))
 	buf, err := io.ReadAll(limited)
 	if err != nil {
-		return nil, fmt.Errorf("read image bytes: %w", err)
+		return nil, "", fmt.Errorf("read image bytes: %w", err)
 	}
 	if len(buf) > maxBytes {
-		return nil, fmt.Errorf("image exceeds %d bytes limit", maxBytes)
+		return nil, "", fmt.Errorf("image exceeds %d bytes limit", maxBytes)
 	}
 	if contentType == "" {
-		if detected := http.DetectContentType(buf); !strings.HasPrefix(detected, "image/") {
-			return nil, fmt.Errorf("unsupported content type: %s", detected)
+		detected := http.DetectContentType(buf)
+		if !strings.HasPrefix(detected, "image/") {
+			return nil, "", fmt.Errorf("unsupported content type: %s", detected)
 		}
+		contentType = detected
 	}
-	return buf, nil
+	return buf, contentType, nil
 }
 
 func hashBytes(data []byte) string {

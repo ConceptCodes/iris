@@ -50,11 +50,16 @@ type Store interface {
 }
 
 type FetchImagePayload struct {
-	URL      string            `json:"url"`
-	Filename string            `json:"filename,omitempty"`
-	Tags     []string          `json:"tags,omitempty"`
-	Meta     map[string]string `json:"meta,omitempty"`
-	RunID    string            `json:"run_id,omitempty"`
+	URL           string            `json:"url"`
+	Filename      string            `json:"filename,omitempty"`
+	Tags          []string          `json:"tags,omitempty"`
+	Meta          map[string]string `json:"meta,omitempty"`
+	RunID         string            `json:"run_id,omitempty"`
+	SourceDomain  string            `json:"source_domain,omitempty"`
+	MimeType      string            `json:"mime_type,omitempty"`
+	PageURL       string            `json:"page_url,omitempty"`
+	Title         string            `json:"title,omitempty"`
+	CrawlSourceID string            `json:"crawl_source_id,omitempty"`
 }
 
 type IndexLocalFilePayload struct {

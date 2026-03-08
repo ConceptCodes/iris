@@ -17,12 +17,14 @@ type htmlDiscovery struct {
 	imageURLs    []string
 	pageURLs     []string
 	canonicalURL string
+	title        string
 }
 
 type HTMLDiscovery struct {
 	ImageURLs    []string
 	PageURLs     []string
 	CanonicalURL string
+	Title        string
 }
 
 func extractHTMLLinks(r io.Reader, base *url.URL, allowedDomains []string) (htmlDiscovery, error) {
@@ -39,6 +41,16 @@ func extractHTMLLinks(r io.Reader, base *url.URL, allowedDomains []string) (html
 	walk = func(node *html.Node) {
 		if node.Type == html.ElementNode {
 			switch node.Data {
+			case "title":
+				if result.title == "" {
+					var titleText strings.Builder
+					for child := node.FirstChild; child != nil; child = child.NextSibling {
+						if child.Type == html.TextNode {
+							titleText.WriteString(child.Data)
+						}
+					}
+					result.title = strings.TrimSpace(titleText.String())
+				}
 			case "link":
 				if attrContainsToken(node, "rel", "canonical") {
 					if href := attr(node, "href"); href != "" && result.canonicalURL == "" {
@@ -94,6 +106,7 @@ func ExtractHTMLLinks(r io.Reader, rawBase string, allowedDomains []string) (HTM
 		ImageURLs:    result.imageURLs,
 		PageURLs:     result.pageURLs,
 		CanonicalURL: result.canonicalURL,
+		Title:        result.title,
 	}, nil
 }
 
