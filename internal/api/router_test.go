@@ -11,7 +11,7 @@ import (
 )
 
 func TestRouterHealth(t *testing.T) {
-	router := NewRouterWithAssets(nil, AssetsSettings{LocalDir: t.TempDir()}, nil, "")
+	router := NewRouterWithAssets(nil, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -25,7 +25,7 @@ func TestRouterHealth(t *testing.T) {
 }
 
 func TestRouterLanding(t *testing.T) {
-	router := NewRouterWithAssets(nil, AssetsSettings{LocalDir: t.TempDir()}, nil, "")
+	router := NewRouterWithAssets(nil, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -39,7 +39,7 @@ func TestRouterLanding(t *testing.T) {
 }
 
 func TestRouterEndpoints(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "")
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 
 	tests := []struct {
 		method string
@@ -62,7 +62,7 @@ func TestRouterEndpoints(t *testing.T) {
 }
 
 func TestRouterMethodEnforcement(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "")
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 	req := httptest.NewRequest("POST", "/health", nil) // health is GET
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -72,7 +72,7 @@ func TestRouterMethodEnforcement(t *testing.T) {
 }
 
 func TestRouterMiddleware(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "")
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 
 	// CORS preflight
 	req := httptest.NewRequest("OPTIONS", "/search/text", nil)
@@ -99,8 +99,9 @@ func TestRouterMiddleware(t *testing.T) {
 }
 
 func TestRouterAdminEndpoints(t *testing.T) {
-	crawlService := crawl.NewService(crawl.NewMemoryStore(), jobs.NewMemoryStore())
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, crawlService, "secret")
+	jobStore := jobs.NewMemoryStore()
+	crawlService := crawl.NewService(crawl.NewMemoryStore(), jobStore)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, crawlService, "secret", jobStore)
 
 	req := httptest.NewRequest("POST", "/admin/sources", strings.NewReader(`{"kind":"local_dir","local_path":"./images"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -113,8 +114,24 @@ func TestRouterAdminEndpoints(t *testing.T) {
 	}
 }
 
+func TestRouterAdminLocalIndexEndpoint(t *testing.T) {
+	jobStore := jobs.NewMemoryStore()
+	crawlService := crawl.NewService(crawl.NewMemoryStore(), jobStore)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, crawlService, "secret", jobStore)
+
+	req := httptest.NewRequest("POST", "/admin/index/local", strings.NewReader(`{"path":"./images"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Admin-Key", "secret")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 enqueueing local index, got %d", w.Result().StatusCode)
+	}
+}
+
 func TestRouterAdminMetrics(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "secret")
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "secret", nil)
 	req := httptest.NewRequest("GET", "/admin/metrics", nil)
 	req.Header.Set("X-Admin-Key", "secret")
 	w := httptest.NewRecorder()
@@ -125,7 +142,7 @@ func TestRouterAdminMetrics(t *testing.T) {
 }
 
 func TestRouterAdminDisabledWithoutKey(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "")
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 	req := httptest.NewRequest("GET", "/admin/runs", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -135,7 +152,7 @@ func TestRouterAdminDisabledWithoutKey(t *testing.T) {
 }
 
 func TestRouterAdminMetricsDisabled(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "")
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 	req := httptest.NewRequest("GET", "/admin/metrics", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)

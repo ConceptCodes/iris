@@ -64,7 +64,29 @@ type CrawlSourceResponse struct {
 	Status string `json:"status"`
 }
 
+type LocalIndexRequest struct {
+	Path string `json:"path"`
+}
+
+type LocalIndexResponse struct {
+	SourceID string `json:"source_id"`
+	RunID    string `json:"run_id"`
+	Status   string `json:"status"`
+}
+
 type TriggerRunResponse struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
+}
+
+type ReindexRequest struct {
+	SourceID string `json:"source_id,omitempty"`
+	RunID    string `json:"run_id,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+	Offset   int    `json:"offset,omitempty"`
+}
+
+type ReindexResponse struct {
+	EnqueuedCount int      `json:"enqueued_count"`
+	Errors        []string `json:"errors,omitempty"`
 }

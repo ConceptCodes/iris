@@ -12,7 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"iris/internal/crawl"
 	"iris/internal/indexing"
+	"iris/internal/jobs"
 	"iris/pkg/models"
 )
 
@@ -74,8 +76,17 @@ func (m *mockSearchEngine) FindExistingID(ctx context.Context, meta map[string]s
 	return "", false, m.err
 }
 
+func (m *mockSearchEngine) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
+	return []models.ImageRecord{}, m.err
+}
+
 func newTestHandler(engine *mockSearchEngine) *Handler {
-	return NewHandler(engine, indexing.NewPipeline(engine, nil), nil, nil)
+	return NewHandler(engine, indexing.NewPipeline(engine, nil), nil, nil, nil)
+}
+
+func newTestHandlerWithCrawl(engine *mockSearchEngine) *Handler {
+	jobStore := jobs.NewMemoryStore()
+	return NewHandler(engine, indexing.NewPipeline(engine, nil), crawl.NewService(crawl.NewMemoryStore(), jobStore), jobStore, nil)
 }
 
 func TestHandler_Health(t *testing.T) {
@@ -286,6 +297,52 @@ func TestHandler_SearchText(t *testing.T) {
 	})
 }
 
+func TestHandler_EnqueueLocalIndex(t *testing.T) {
+	t.Run("requires valid json", func(t *testing.T) {
+		h := newTestHandlerWithCrawl(&mockSearchEngine{})
+		req := httptest.NewRequest("POST", "/admin/index/local", strings.NewReader(`{`))
+		w := httptest.NewRecorder()
+
+		h.EnqueueLocalIndex(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("requires path", func(t *testing.T) {
+		h := newTestHandlerWithCrawl(&mockSearchEngine{})
+		req := httptest.NewRequest("POST", "/admin/index/local", strings.NewReader(`{"path":"   "}`))
+		w := httptest.NewRecorder()
+
+		h.EnqueueLocalIndex(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("creates source and run", func(t *testing.T) {
+		h := newTestHandlerWithCrawl(&mockSearchEngine{})
+		req := httptest.NewRequest("POST", "/admin/index/local", strings.NewReader(`{"path":"./images/bootstrap"}`))
+		w := httptest.NewRecorder()
+
+		h.EnqueueLocalIndex(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+
+		var resp models.LocalIndexResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if resp.SourceID == "" || resp.RunID == "" || resp.Status != string(crawl.RunStatusRunning) {
+			t.Fatalf("unexpected response: %+v", resp)
+		}
+	})
+}
+
 func TestHandler_SearchImage(t *testing.T) {
 	createMultipartRequest := func(topK, filters string) (*http.Request, error) {
 		var b bytes.Buffer
@@ -305,7 +362,7 @@ func TestHandler_SearchImage(t *testing.T) {
 	}
 
 	t.Run("multipart parse and engine error", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{err: errors.New("engine error")}, nil, nil, nil)
+		h := NewHandler(&mockSearchEngine{err: errors.New("engine error")}, nil, nil, nil, nil)
 		req, _ := createMultipartRequest("", "")
 		w := httptest.NewRecorder()
 		h.SearchImage(w, req)
@@ -316,7 +373,7 @@ func TestHandler_SearchImage(t *testing.T) {
 
 	t.Run("success parsing valid strings", func(t *testing.T) {
 		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil, nil)
+		h := NewHandler(mock, nil, nil, nil, nil)
 		req, _ := createMultipartRequest("10", `{"color":"blue"}`)
 		w := httptest.NewRecorder()
 		h.SearchImage(w, req)
@@ -330,7 +387,7 @@ func TestHandler_SearchImage(t *testing.T) {
 
 	t.Run("success fallback for invalid top_k and filters", func(t *testing.T) {
 		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil, nil)
+		h := NewHandler(mock, nil, nil, nil, nil)
 		req, _ := createMultipartRequest("abc", `{not_json}`)
 		w := httptest.NewRecorder()
 		h.SearchImage(w, req)
@@ -345,7 +402,7 @@ func TestHandler_SearchImage(t *testing.T) {
 
 func TestHandler_SearchImageURL(t *testing.T) {
 	t.Run("invalid json", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{}, nil, nil, nil)
+		h := NewHandler(&mockSearchEngine{}, nil, nil, nil, nil)
 		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{invalid`))
 		w := httptest.NewRecorder()
 		h.SearchImageURL(w, req)
@@ -354,7 +411,7 @@ func TestHandler_SearchImageURL(t *testing.T) {
 		}
 	})
 	t.Run("empty URL", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{}, nil, nil, nil)
+		h := NewHandler(&mockSearchEngine{}, nil, nil, nil, nil)
 		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{"url": ""}`))
 		w := httptest.NewRecorder()
 		h.SearchImageURL(w, req)
@@ -364,7 +421,7 @@ func TestHandler_SearchImageURL(t *testing.T) {
 	})
 	t.Run("success", func(t *testing.T) {
 		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil, nil)
+		h := NewHandler(mock, nil, nil, nil, nil)
 		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{"url": "http://x.com", "top_k": 7, "filters": {"f": "v"}}`))
 		w := httptest.NewRecorder()
 		h.SearchImageURL(w, req)

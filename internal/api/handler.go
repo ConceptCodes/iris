@@ -2,12 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"iris/internal/crawl"
 	"iris/internal/indexing"
+	"iris/internal/jobs"
 	"iris/internal/metrics"
 	"iris/internal/search"
 	"iris/pkg/models"
@@ -19,11 +21,12 @@ type Handler struct {
 	engine       search.Engine
 	indexer      *indexing.Pipeline
 	crawlService *crawl.Service
+	jobStore     jobs.Store
 	metrics      *metrics.Counters
 }
 
-func NewHandler(engine search.Engine, indexer *indexing.Pipeline, crawlService *crawl.Service, metrics *metrics.Counters) *Handler {
-	return &Handler{engine: engine, indexer: indexer, crawlService: crawlService, metrics: metrics}
+func NewHandler(engine search.Engine, indexer *indexing.Pipeline, crawlService *crawl.Service, jobStore jobs.Store, metrics *metrics.Counters) *Handler {
+	return &Handler{engine: engine, indexer: indexer, crawlService: crawlService, jobStore: jobStore, metrics: metrics}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -276,6 +279,44 @@ func (h *Handler) TriggerSourceRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.TriggerRunResponse{RunID: run.ID, Status: string(run.Status)})
 }
 
+func (h *Handler) EnqueueLocalIndex(w http.ResponseWriter, r *http.Request) {
+	if h.crawlService == nil {
+		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
+		return
+	}
+	var req models.LocalIndexRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	source, err := h.crawlService.CreateSource(r.Context(), crawl.CreateSourceInput{
+		Kind:      crawl.SourceKindLocalDir,
+		LocalPath: req.Path,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	run, err := h.crawlService.TriggerRun(r.Context(), source.ID, "manual")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if h.metrics != nil {
+		h.metrics.IncCrawlRunsQueued()
+	}
+	writeJSON(w, http.StatusOK, models.LocalIndexResponse{
+		SourceID: source.ID,
+		RunID:    run.ID,
+		Status:   string(run.Status),
+	})
+}
+
 func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	if h.crawlService == nil {
 		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
@@ -308,6 +349,81 @@ func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"metrics": h.metrics.Snapshot()})
+}
+
+func (h *Handler) HandleReindex(w http.ResponseWriter, r *http.Request) {
+	if h.jobStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "job store unavailable")
+		return
+	}
+	var req models.ReindexRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+
+	filters := make(map[string]string)
+	if req.SourceID != "" {
+		filters["meta_source_id"] = req.SourceID
+	}
+	if req.RunID != "" {
+		filters["meta_run_id"] = req.RunID
+	}
+
+	limit := uint32(100)
+	if req.Limit > 0 {
+		limit = uint32(req.Limit)
+	}
+	offset := uint32(0)
+	if req.Offset > 0 {
+		offset = uint32(req.Offset)
+	}
+
+	images, err := h.engine.ListImages(r.Context(), filters, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	errors := []string{}
+	enqueuedCount := 0
+	for _, image := range images {
+		sourceURL := image.URL
+		if image.Meta != nil {
+			if s := image.Meta["origin_url"]; s != "" {
+				sourceURL = s
+			} else if s := image.Meta["source_url"]; s != "" {
+				sourceURL = s
+			}
+		}
+		if sourceURL == "" {
+			errors = append(errors, fmt.Sprintf("no source URL for image %s", image.ID))
+			continue
+		}
+
+		payload, err := json.Marshal(jobs.ReindexImagePayload{
+			ID:  image.ID,
+			URL: sourceURL,
+		})
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to marshal payload for %s: %v", image.ID, err))
+			continue
+		}
+
+		if _, err := h.jobStore.Enqueue(r.Context(), jobs.Job{
+			Type:        jobs.TypeReindexImage,
+			PayloadJSON: payload,
+		}); err != nil {
+			errors = append(errors, fmt.Sprintf("failed to enqueue reindex job for %s: %v", image.ID, err))
+			continue
+		}
+		enqueuedCount++
+	}
+
+	writeJSON(w, http.StatusOK, models.ReindexResponse{
+		EnqueuedCount: enqueuedCount,
+		Errors:        errors,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

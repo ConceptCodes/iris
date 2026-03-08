@@ -6,9 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
 	"iris/internal/assets"
 	"iris/internal/crawl"
 	"iris/internal/indexing"
@@ -16,6 +13,10 @@ import (
 	"iris/internal/metrics"
 	"iris/internal/search"
 	"iris/internal/web"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 )
 
 type AssetsSettings struct {
@@ -33,10 +34,10 @@ type AssetsSettings struct {
 }
 
 func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Service, adminAPIKey string) http.Handler {
-	return NewRouterWithAssets(engine, AssetsSettings{LocalDir: assetDir}, crawlService, adminAPIKey)
+	return NewRouterWithAssets(engine, AssetsSettings{LocalDir: assetDir}, crawlService, adminAPIKey, nil)
 }
 
-func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlService *crawl.Service, adminAPIKey string) http.Handler {
+func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlService *crawl.Service, adminAPIKey string, jobStore jobs.Store) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -54,19 +55,26 @@ func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlSe
 
 	assetStore, assetDir := buildAssetStore(assetsCfg)
 	indexer := indexing.NewPipeline(engine, assetStore)
+	if jobStore == nil {
+		jobStore = jobs.NewMemoryStore()
+	}
 	metrics := metrics.NewCounters()
-	h := NewHandler(engine, indexer, crawlService, metrics)
+	h := NewHandler(engine, indexer, crawlService, jobStore, metrics)
 	wh := web.NewHandlers(engine)
 
 	if adminAPIKey != "" {
 		r.With(requireAdminKey(adminAPIKey)).Post("/admin/sources", h.CreateSource)
 		r.With(requireAdminKey(adminAPIKey)).Post("/admin/sources/{id}/run", h.TriggerSourceRun)
+		r.With(requireAdminKey(adminAPIKey)).Post("/admin/index/local", h.EnqueueLocalIndex)
+		r.With(requireAdminKey(adminAPIKey)).Post("/admin/reindex", h.HandleReindex)
 		r.With(requireAdminKey(adminAPIKey)).Get("/admin/runs", h.ListRuns)
 		r.With(requireAdminKey(adminAPIKey)).Get("/admin/runs/{id}", h.GetRun)
 		r.With(requireAdminKey(adminAPIKey)).Get("/admin/metrics", h.Metrics)
 	} else {
 		r.Post("/admin/sources", adminDisabled)
 		r.Post("/admin/sources/{id}/run", adminDisabled)
+		r.Post("/admin/index/local", adminDisabled)
+		r.Post("/admin/reindex", adminDisabled)
 		r.Get("/admin/runs", adminDisabled)
 		r.Get("/admin/runs/{id}", adminDisabled)
 		r.Get("/admin/metrics", adminDisabled)
@@ -118,7 +126,7 @@ func buildAssetStore(cfg AssetsSettings) (assets.Store, string) {
 	return store, ""
 }
 
-func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, func(), error) {
+func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, jobs.Store, func(), error) {
 	var (
 		jobStore   jobs.Store
 		crawlStore crawl.Store
@@ -131,22 +139,22 @@ func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, func(), er
 	case "postgres":
 		jobStore, err = jobs.NewPostgresStore(context.Background(), jobStoreDSN)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		crawlStore, err = crawl.NewPostgresStore(context.Background(), jobStoreDSN)
 		if err != nil {
 			jobStore.Close()
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	default:
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	cleanup := func() {
 		jobStore.Close()
 		crawlStore.Close()
 	}
-	return crawl.NewService(crawlStore, jobStore), cleanup, nil
+	return crawl.NewService(crawlStore, jobStore), jobStore, cleanup, nil
 }
 
 func requireAdminKey(expected string) func(http.Handler) http.Handler {
