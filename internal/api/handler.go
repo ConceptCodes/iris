@@ -36,11 +36,13 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncIndexRequest()
 	}
+	metrics.IncIndexRequestPrometheus("url")
 	var req models.IndexRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
+		metrics.IncIndexErrorPrometheus("url")
 		writeError(w, http.StatusBadRequest, constants.MessageInvalidJSON)
 		return
 	}
@@ -48,17 +50,21 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
+		metrics.IncIndexErrorPrometheus("url")
 		writeError(w, http.StatusBadRequest, constants.MessageURLRequired)
 		return
 	}
+	start := time.Now()
 	id, err := h.indexer.IndexFromURL(r.Context(), req)
 	if err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
+		metrics.IncIndexErrorPrometheus("url")
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	metrics.ObserveIndexLatency("url", time.Since(start))
 	writeJSON(w, http.StatusOK, models.IndexResponse{ID: id, Message: "indexed"})
 }
 
@@ -66,10 +72,12 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncIndexRequest()
 	}
+	metrics.IncIndexRequestPrometheus("upload")
 	if err := r.ParseMultipartForm(constants.MaxImageSize); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
+		metrics.IncIndexErrorPrometheus("upload")
 		writeError(w, http.StatusBadRequest, constants.StatusMsgFileTooLarge)
 		return
 	}
@@ -78,6 +86,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
+		metrics.IncIndexErrorPrometheus("upload")
 		writeError(w, http.StatusBadRequest, constants.MessageImageRequired)
 		return
 	}
@@ -87,6 +96,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
+		metrics.IncIndexErrorPrometheus("upload")
 		writeError(w, http.StatusInternalServerError, constants.MsgFailedToReadFile)
 		return
 	}
@@ -104,14 +114,17 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 			meta[strings.TrimPrefix(key, constants.PayloadFieldMetaPrefix)] = values[0]
 		}
 	}
+	start := time.Now()
 	id, err := h.indexer.IndexUploadedBytes(r.Context(), buf, filename, tags, meta)
 	if err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
+		metrics.IncIndexErrorPrometheus("upload")
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	metrics.ObserveIndexLatency("upload", time.Since(start))
 	writeJSON(w, http.StatusOK, models.IndexResponse{ID: id, Message: "indexed"})
 }
 
@@ -119,11 +132,13 @@ func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncSearchRequest()
 	}
+	metrics.IncSearchRequestPrometheus("text")
 	var req models.TextSearchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("text")
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
@@ -131,6 +146,7 @@ func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("text")
 		writeError(w, http.StatusBadRequest, "query is required")
 		return
 	}
@@ -140,9 +156,11 @@ func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("text")
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	metrics.ObserveSearchLatency("text", time.Since(start))
 	writeJSON(w, http.StatusOK, models.TextSearchResponse{
 		Results: results,
 		Query:   req.Query,
@@ -154,10 +172,12 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncSearchRequest()
 	}
+	metrics.IncSearchRequestPrometheus("image_upload")
 	if err := r.ParseMultipartForm(constants.MaxImageSize); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("image_upload")
 		writeError(w, http.StatusBadRequest, "file too large or invalid form")
 		return
 	}
@@ -166,6 +186,7 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("image_upload")
 		writeError(w, http.StatusBadRequest, "image file is required")
 		return
 	}
@@ -175,6 +196,7 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("image_upload")
 		writeError(w, http.StatusInternalServerError, "failed to read file")
 		return
 	}
@@ -186,9 +208,11 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("image_upload")
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	metrics.ObserveSearchLatency("image_upload", time.Since(start))
 	writeJSON(w, http.StatusOK, models.ImageSearchResponse{
 		Results: results,
 		TookMs:  time.Since(start).Milliseconds(),
@@ -199,6 +223,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncSearchRequest()
 	}
+	metrics.IncSearchRequestPrometheus("image_url")
 	var req struct {
 		URL     string            `json:"url"`
 		TopK    int               `json:"top_k"`
@@ -208,6 +233,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("image_url")
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
@@ -215,6 +241,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("image_url")
 		writeError(w, http.StatusBadRequest, "url is required")
 		return
 	}
@@ -224,9 +251,11 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
+		metrics.IncSearchErrorPrometheus("image_url")
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	metrics.ObserveSearchLatency("image_url", time.Since(start))
 	writeJSON(w, http.StatusOK, models.ImageSearchResponse{
 		Results: results,
 		Query:   req.URL,
@@ -275,6 +304,7 @@ func (h *Handler) TriggerSourceRun(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncCrawlRunsQueued()
 	}
+	metrics.IncCrawlRunsQueuedPrometheus()
 	writeJSON(w, http.StatusOK, models.TriggerRunResponse{RunID: run.ID, Status: string(run.Status)})
 }
 
@@ -309,6 +339,7 @@ func (h *Handler) EnqueueLocalIndex(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncCrawlRunsQueued()
 	}
+	metrics.IncCrawlRunsQueuedPrometheus()
 	writeJSON(w, http.StatusOK, models.LocalIndexResponse{
 		SourceID: source.ID,
 		RunID:    run.ID,

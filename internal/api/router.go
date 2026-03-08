@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/riandyrn/otelchi"
 )
 
 type AssetsSettings struct {
@@ -52,14 +53,16 @@ func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlSe
 		AllowCredentials: true,
 		MaxAge:           constants.CORSMaxAge,
 	}))
+	// Add OpenTelemetry instrumentation
+	r.Use(otelchi.Middleware("iris-server", otelchi.WithChiRoutes(r)))
 
 	assetStore, assetDir := buildAssetStore(assetsCfg)
 	indexer := indexing.NewPipeline(engine, assetStore)
 	if jobStore == nil {
 		jobStore = jobs.NewMemoryStore()
 	}
-	metrics := metrics.NewCounters()
-	h := NewHandler(engine, indexer, crawlService, jobStore, metrics)
+	counters := metrics.NewCounters()
+	h := NewHandler(engine, indexer, crawlService, jobStore, counters)
 	wh := web.NewHandlers(engine)
 
 	if adminAPIKey != "" {
@@ -81,6 +84,7 @@ func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlSe
 	}
 
 	r.Get(constants.PathHealth, h.Health)
+	r.Handle("/metrics", metrics.Handler())
 
 	r.Get(constants.PathLanding, wh.LandingPage)
 	r.Get(constants.PathSearch, wh.SearchResults)
