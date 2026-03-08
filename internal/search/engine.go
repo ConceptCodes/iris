@@ -6,12 +6,13 @@ import (
 	"math"
 	"reflect"
 
+	"iris/internal/constants"
 	"iris/pkg/models"
 
 	"github.com/google/uuid"
 )
 
-const defaultTopK = 20
+const defaultTopK = constants.DefaultLimit40
 
 type Engine interface {
 	IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error)
@@ -180,22 +181,22 @@ func (e *engineImpl) FindExistingID(ctx context.Context, meta map[string]string,
 	if meta == nil {
 		meta = map[string]string{}
 	}
-	if hash := meta["content_sha256"]; hash != "" {
-		if id, ok, err := e.store.FindIDByMeta(ctx, "meta_content_sha256", hash); err != nil {
+	if hash := meta[constants.MetaKeyContentSHA256]; hash != "" {
+		if id, ok, err := e.store.FindIDByMeta(ctx, constants.PayloadFieldMetaPrefix+constants.MetaKeyContentSHA256, hash); err != nil {
 			return "", false, err
 		} else if ok {
 			return id, true, nil
 		}
 	}
-	if source := meta["source_url"]; source != "" {
-		if id, ok, err := e.store.FindIDByMeta(ctx, "meta_source_url", source); err != nil {
+	if source := meta[constants.MetaKeySourceURL]; source != "" {
+		if id, ok, err := e.store.FindIDByMeta(ctx, constants.PayloadFieldMetaPrefix+constants.MetaKeySourceURL, source); err != nil {
 			return "", false, err
 		} else if ok {
 			return id, true, nil
 		}
 	}
 	if fallbackURL != "" {
-		if id, ok, err := e.store.FindIDByMeta(ctx, "meta_source_url", fallbackURL); err != nil {
+		if id, ok, err := e.store.FindIDByMeta(ctx, constants.PayloadFieldMetaPrefix+constants.MetaKeySourceURL, fallbackURL); err != nil {
 			return "", false, err
 		} else if ok {
 			return id, true, nil
