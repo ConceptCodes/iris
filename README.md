@@ -54,6 +54,8 @@ What is implemented now:
 - downstream job dedupe within a crawl run
 - per-source crawl throttling via `rate_limit_rps`
 - crawl run counters for discovered, indexed, and failed items
+- robots.txt checks before crawling or enqueuing discovered URLs
+- rel=canonical parsing to collapse duplicate page discovery
 - Docker Compose services for Postgres and worker
 
 What is scaffolded but not finished:
@@ -268,11 +270,13 @@ What it does today:
 - reuses `internal/indexing`
 - dedupes downstream image and local-file jobs within a run
 - applies per-source crawl throttling when `rate_limit_rps` is set
+- respects `robots.txt` for crawled pages and discovered image URLs
+- uses `rel=canonical` as a duplicate-page consolidation signal
 - updates crawl runs as discovery and indexing progress
 
 What it does not do yet:
 
-- follow advanced crawl policies like robots.txt
+- follow advanced crawl policies like crawl-budget tuning and robots cache expiry
 - expose job dedupe and crawl metrics through richer admin dashboards
 
 ## Configuration
