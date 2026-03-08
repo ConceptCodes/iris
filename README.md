@@ -48,15 +48,16 @@ What is implemented now:
 - local asset persistence for uploaded and local images
 - batch indexing CLI
 - worker with memory and Postgres job backends
+- domain, sitemap, local-dir, and url-list crawl source types
 - crawl source and run persistence
 - admin APIs for creating sources and triggering runs
 - Docker Compose services for Postgres and worker
 
 What is scaffolded but not finished:
 
-- HTML/domain/sitemap crawling
 - run progress aggregation beyond enqueue counts
-- auth around admin ingestion APIs
+- richer crawl controls like rate limiting and robots handling
+- auth beyond a single shared admin API key
 
 ## Quick Start
 
@@ -81,6 +82,7 @@ This starts:
 | `worker` | n/a | Background index worker seeded from demo URLs |
 
 The Compose setup mounts `./data/assets` into the server container so uploaded and local indexed images remain renderable in the UI.
+The Compose server and worker both use the same Postgres job/crawl store, and the admin API key is set to `dev-admin-key`.
 
 ## Developer Commands
 
@@ -161,6 +163,7 @@ Implemented admin endpoints:
 ```bash
 curl -X POST http://localhost:8080/admin/sources \
   -H 'Content-Type: application/json' \
+  -H 'X-Admin-Key: dev-admin-key' \
   -d '{
     "kind": "local_dir",
     "local_path": "./images"
@@ -172,9 +175,37 @@ curl -X POST http://localhost:8080/admin/sources \
 ```bash
 curl -X POST http://localhost:8080/admin/sources \
   -H 'Content-Type: application/json' \
+  -H 'X-Admin-Key: dev-admin-key' \
   -d '{
     "kind": "url_list",
     "seed_url": "https://example.com/list.txt"
+  }'
+```
+
+`domain` source:
+
+```bash
+curl -X POST http://localhost:8080/admin/sources \
+  -H 'Content-Type: application/json' \
+  -H 'X-Admin-Key: dev-admin-key' \
+  -d '{
+    "kind": "domain",
+    "seed_url": "https://example.com",
+    "max_depth": 1,
+    "allowed_domains": ["example.com"]
+  }'
+```
+
+`sitemap` source:
+
+```bash
+curl -X POST http://localhost:8080/admin/sources \
+  -H 'Content-Type: application/json' \
+  -H 'X-Admin-Key: dev-admin-key' \
+  -d '{
+    "kind": "sitemap",
+    "seed_url": "https://example.com/sitemap.xml",
+    "allowed_domains": ["example.com"]
   }'
 ```
 
@@ -183,14 +214,15 @@ curl -X POST http://localhost:8080/admin/sources \
 ```bash
 curl -X POST http://localhost:8080/admin/sources/<source-id>/run \
   -H 'Content-Type: application/json' \
+  -H 'X-Admin-Key: dev-admin-key' \
   -d '{"trigger":"manual"}'
 ```
 
 ### Inspect runs
 
 ```bash
-curl http://localhost:8080/admin/runs
-curl http://localhost:8080/admin/runs/<run-id>
+curl -H 'X-Admin-Key: dev-admin-key' http://localhost:8080/admin/runs
+curl -H 'X-Admin-Key: dev-admin-key' http://localhost:8080/admin/runs/<run-id>
 ```
 
 ## CLI Indexing
@@ -228,14 +260,14 @@ What it does today:
 
 - leases jobs from memory or Postgres
 - handles `fetch_image` and `index_local_file`
-- handles `discover_source` for `local_dir` and `url_list` sources
+- handles `discover_source` for `local_dir`, `url_list`, `domain`, and `sitemap` sources
 - reuses `internal/indexing`
 - updates crawl runs in the crawl store
 
 What it does not do yet:
 
-- crawl remote pages
-- process `domain` or `sitemap` discovery sources
+- follow advanced crawl policies like robots.txt or rate limiting
+- maintain rich per-run indexing statistics
 
 ## Configuration
 
@@ -250,6 +282,7 @@ What it does not do yet:
 | `WORKER_MODE` | `indexer` | Worker mode: `indexer` or `crawler` |
 | `JOB_BACKEND` | `memory` | Worker job backend |
 | `JOB_STORE_DSN` | `postgres://iris:iris@localhost:5432/iris?sslmode=disable` | Postgres DSN for durable jobs |
+| `ADMIN_API_KEY` | empty | Enables and protects `/admin/*` endpoints when set |
 | `JOB_POLL_INTERVAL` | `1s` | Worker idle poll interval |
 | `LEASE_DURATION` | `30s` | Worker lease duration |
 
@@ -280,6 +313,7 @@ What it does not do yet:
 │   ├── clip/
 │   │   └── client.go         CLIP sidecar HTTP client
 │   ├── crawl/
+│   │   ├── extractor.go      HTML and sitemap discovery helpers
 │   │   ├── service.go        Source/run orchestration
 │   │   ├── memory.go         In-memory crawl store
 │   │   └── postgres.go       Postgres crawl store
