@@ -15,6 +15,7 @@ import (
 	"iris/internal/constants"
 	"iris/internal/search"
 	"iris/internal/store"
+	"iris/internal/tracing"
 )
 
 func main() {
@@ -23,7 +24,21 @@ func main() {
 
 	cfg := config.LoadServer()
 
-	slog.Info("starting server", "clip_addr", cfg.ClipAddr, "qdrant_addr", cfg.QdrantAddr, "dim", cfg.ClipDim, "asset_dir", cfg.AssetDir)
+	slog.Info("starting server", "clip_addr", cfg.ClipAddr, "qdrant_addr", cfg.QdrantAddr, "dim", cfg.ClipDim, "asset_dir", cfg.AssetDir, "otel_enabled", cfg.OtelEnabled)
+
+	// Initialize OpenTelemetry tracer if enabled
+	var otelShutdown func()
+	if cfg.OtelEnabled {
+		var err error
+		otelShutdown, err = tracing.InitTracer(context.Background(), "iris-server", cfg.OtelEndpoint)
+		if err != nil {
+			slog.Warn("failed to initialize tracer, continuing without tracing", "error", err)
+			otelShutdown = nil
+		} else {
+			defer otelShutdown()
+			slog.Info("tracing initialized", "endpoint", cfg.OtelEndpoint)
+		}
+	}
 
 	clipClient := clip.NewClient(cfg.ClipAddr)
 	qdrantStore, err := store.NewQdrantStore(cfg.QdrantAddr, cfg.ClipDim, 3*time.Second)

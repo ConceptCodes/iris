@@ -31,6 +31,8 @@ const (
 	defaultUserAgent       = "iris/1.0"
 	defaultCrawlMaxDepth   = 1
 	defaultCrawlRPS        = 0
+	defaultOtelEnabled     = true
+	defaultOtelEndpoint    = "localhost:4317"
 )
 
 const (
@@ -53,6 +55,8 @@ type Shared struct {
 	AssetPrefix     string
 	AssetPublicBase string
 	AssetPathStyle  bool
+	OtelEnabled     bool
+	OtelEndpoint    string
 }
 
 type Server struct {
@@ -251,6 +255,14 @@ func loadShared() Shared {
 		AssetPathStyle: getEnvBool(
 			"ASSET_S3_PATH_STYLE",
 			false,
+		),
+		OtelEnabled: getEnvBool(
+			"OTEL_ENABLED",
+			defaultOtelEnabled,
+		),
+		OtelEndpoint: getEnv(
+			"OTEL_ENDPOINT",
+			defaultOtelEndpoint,
 		),
 	}
 }

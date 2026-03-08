@@ -24,8 +24,10 @@ import (
 	"iris/internal/crawl"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
+	"iris/internal/metrics"
 	"iris/internal/search"
 	"iris/internal/store"
+	"iris/internal/tracing"
 	"iris/pkg/models"
 )
 
@@ -122,7 +124,21 @@ func main() {
 	seedDir := flag.String("seed-dir", "", "optional local directory to enqueue as index_local_file jobs")
 	flag.Parse()
 
-	slog.Info("starting worker", "mode", cfg.Mode, "backend", cfg.JobBackend)
+	slog.Info("starting worker", "mode", cfg.Mode, "backend", cfg.JobBackend, "otel_enabled", cfg.OtelEnabled)
+
+	// Initialize OpenTelemetry tracer if enabled
+	var otelShutdown func()
+	if cfg.OtelEnabled {
+		var err error
+		otelShutdown, err = tracing.InitTracer(context.Background(), "iris-worker", cfg.OtelEndpoint)
+		if err != nil {
+			slog.Warn("failed to initialize tracer, continuing without tracing", "error", err)
+			otelShutdown = nil
+		} else {
+			defer otelShutdown()
+			slog.Info("tracing initialized", "endpoint", cfg.OtelEndpoint)
+		}
+	}
 
 	jobStore, err := newJobStore(cfg)
 	if err != nil {
@@ -227,6 +243,7 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 			}
 		}
 
+		jobStart := time.Now()
 		if err := handleIndexerJob(ctx, pipeline, job); err != nil {
 			slog.Error("job failed", "job_id", job.ID, "type", job.Type, "error", err)
 
@@ -246,12 +263,15 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 			if markStatus == jobs.StatusDeadLetter {
 				_ = incrementRunFailedForJob(ctx, crawlStore, job, err)
 			}
+			metrics.IncWorkerJobFailed()
 			continue
 		}
 
 		if err := jobStore.MarkSucceeded(ctx, job.ID); err != nil {
 			return err
 		}
+		metrics.IncWorkerJobSucceeded()
+		metrics.ObserveWorkerJobLatency(time.Since(jobStart))
 		_ = incrementRunIndexedForJob(ctx, crawlStore, job)
 	}
 }
@@ -288,6 +308,7 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 			}
 		}
 
+		jobStart := time.Now()
 		if err := handleCrawlerJob(ctx, cfg, runtime, jobStore, crawlStore, job); err != nil {
 			slog.Error("crawler job failed", "job_id", job.ID, "error", err)
 
@@ -303,11 +324,14 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 			if _, markErr := jobStore.MarkFailed(ctx, job.ID, err, retryAt); markErr != nil {
 				return markErr
 			}
+			metrics.IncWorkerJobFailed()
 			continue
 		}
 		if err := jobStore.MarkSucceeded(ctx, job.ID); err != nil {
 			return err
 		}
+		metrics.IncWorkerJobSucceeded()
+		metrics.ObserveWorkerJobLatency(time.Since(jobStart))
 	}
 }
 
@@ -565,6 +589,7 @@ func enqueueLocalDirJobs(ctx context.Context, jobStore jobs.Store, dir, runID st
 		count++
 		return nil
 	})
+	metrics.IncCrawlJobsDiscovered()
 	return count, err
 }
 
@@ -608,6 +633,7 @@ func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, run
 		}
 		count++
 	}
+	metrics.IncCrawlJobsDiscovered()
 	return count, nil
 }
 
@@ -714,7 +740,7 @@ func discoverDomainSource(ctx context.Context, cfg config.Worker, runtime *crawl
 			queue = append(queue, queueItem{url: pageURL, depth: item.depth + 1})
 		}
 	}
-
+	metrics.IncCrawlJobsDiscovered()
 	return discovered, nil
 }
 
@@ -800,6 +826,7 @@ func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *craw
 			discovered++
 		}
 	}
+	metrics.IncCrawlJobsDiscovered()
 	return discovered, nil
 }
 
@@ -831,6 +858,7 @@ func incrementRunIndexedForJob(ctx context.Context, crawlStore crawl.Store, job 
 	if err != nil || runID == "" {
 		return nil
 	}
+	metrics.IncCrawlJobsIndexed()
 	return crawlStore.IncrementRunIndexed(ctx, runID, 1)
 }
 
@@ -839,6 +867,7 @@ func incrementRunFailedForJob(ctx context.Context, crawlStore crawl.Store, job j
 	if err != nil || runID == "" {
 		return nil
 	}
+	metrics.IncCrawlJobsFailed()
 	return crawlStore.IncrementRunFailed(ctx, runID, 1, failure.Error())
 }
 
