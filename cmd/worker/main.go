@@ -38,6 +38,7 @@ func main() {
 		slog.Error("failed to initialize job store", "error", err)
 		os.Exit(1)
 	}
+	defer jobStore.Close()
 
 	if *seedURLFile != "" {
 		if err := enqueueURLFile(context.Background(), jobStore, *seedURLFile); err != nil {
@@ -73,6 +74,8 @@ func newJobStore(cfg config.Worker) (jobs.Store, error) {
 	switch cfg.JobBackend {
 	case "memory":
 		return jobs.NewMemoryStore(), nil
+	case "postgres":
+		return jobs.NewPostgresStore(context.Background(), cfg.JobStoreDSN)
 	default:
 		return nil, fmt.Errorf("unsupported job backend: %s", cfg.JobBackend)
 	}
