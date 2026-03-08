@@ -57,7 +57,7 @@ func Layout(title string, query string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<script src=\"https://cdn.tailwindcss.com\"></script><script src=\"https://unpkg.com/htmx.org@1.9.10\"></script><link rel=\"stylesheet\" href=\"/static/app.css\"></head><body class=\"bg-white min-h-screen\"><div id=\"upload-modal\" class=\"fixed inset-0 z-50 hidden\"><div class=\"absolute inset-0 bg-black bg-opacity-40\" onclick=\"closeUploadModal()\"></div><div class=\"absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-2xl w-[560px] max-w-[95vw]\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<script src=\"https://cdn.tailwindcss.com\"></script><script src=\"https://unpkg.com/htmx.org@1.9.10\"></script><link rel=\"stylesheet\" href=\"/static/app.css\"></head><body class=\"bg-white dark:bg-gray-900 min-h-screen transition-colors\"><div id=\"upload-modal\" class=\"fixed inset-0 z-50 hidden\"><div class=\"absolute inset-0 bg-black bg-opacity-40\" onclick=\"closeUploadModal()\"></div><div class=\"absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-[560px] max-w-[95vw]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -65,7 +65,7 @@ func Layout(title string, query string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div></div><div id=\"detail-panel-container\" class=\"fixed top-[100px] right-0 bottom-0 w-[430px] bg-white border-l border-gray-200 translate-x-full overflow-y-auto z-40\"><div id=\"detail-panel\"></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div></div><div id=\"detail-panel-container\" class=\"fixed top-[100px] right-0 bottom-0 w-[430px] bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 translate-x-full overflow-y-auto z-40\"><div id=\"detail-panel\"></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -96,3 +96,41 @@ document.body.addEventListener('htmx:beforeSwap', function(evt) {
     closeUploadModal();
   }
 });
+// Theme toggle functionality
+function toggleTheme() {
+  const body = document.body;
+  const isDark = body.classList.contains('dark');
+  const theme = isDark ? 'light' : 'dark';
+  
+  if (theme === 'dark') {
+    body.classList.add('dark');
+    localStorage.setItem('theme', 'dark');
+    document.getElementById('theme-icon-sun').classList.add('hidden');
+    document.getElementById('theme-icon-moon').classList.remove('hidden');
+  } else {
+    body.classList.remove('dark');
+    localStorage.setItem('theme', 'light');
+    document.getElementById('theme-icon-moon').classList.add('hidden');
+    document.getElementById('theme-icon-sun').classList.remove('hidden');
+  }
+}
+
+// Initialize theme on page load
+document.addEventListener('DOMContentLoaded', function() {
+  const savedTheme = localStorage.getItem('theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+  
+  if (theme === 'dark') {
+    document.body.classList.add('dark');
+    if (document.getElementById('theme-icon-sun')) {
+      document.getElementById('theme-icon-sun').classList.add('hidden');
+      document.getElementById('theme-icon-moon').classList.remove('hidden');
+    }
+  } else {
+    if (document.getElementById('theme-icon-moon')) {
+      document.getElementById('theme-icon-moon').classList.add('hidden');
+      document.getElementById('theme-icon-sun').classList.remove('hidden');
+    }
+  }
+});

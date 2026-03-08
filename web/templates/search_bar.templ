@@ -2,8 +2,8 @@ package templates
 
 templ SearchBar(query string, variant string) {
 	<form action="/search" method="GET" class={ "w-full", templ.KV("max-w-[584px] mx-auto", variant == "hero") }>
-		<div class="search-box flex items-center h-11 px-4 bg-white border border-[#dfe1e5] rounded-full hover:shadow-md transition-shadow">
-			<svg class="w-5 h-5 text-gray-400 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+		<div class="search-box flex items-center h-11 px-4 bg-white dark:bg-gray-800 border border-[#dfe1e5] dark:border-gray-600 rounded-full hover:shadow-md transition-shadow">
+			<svg class="w-5 h-5 text-gray-400 dark:text-gray-300 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
 			</svg>
 			<input
@@ -18,17 +18,17 @@ templ SearchBar(query string, variant string) {
 			<button
 				id="clear-btn"
 				type="button"
-				class="hidden mr-2 p-1 hover:bg-gray-100 rounded-full"
+				class="hidden mr-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
 				onclick="document.getElementById('search-input').value=''; this.style.display='none';"
 			>
-				<svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
 				</svg>
 			</button>
-			<div class="w-px h-6 bg-gray-300 mr-3"></div>
+			<div class="w-px h-6 bg-gray-300 dark:bg-gray-600 mr-3"></div>
 			<button
 				type="button"
-				class="p-2 hover:bg-gray-100 rounded-full"
+				class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
 				onclick="openUploadModal()"
 			>
 				<svg class="w-6 h-6 text-[#4285f4]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
