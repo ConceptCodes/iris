@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
+	"iris/internal/constants"
 	"iris/pkg/models"
 )
-
-const maxImageSize = 20 << 20
 
 type Client struct {
 	baseURL    string
@@ -24,7 +22,7 @@ func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: constants.HTTPTimeout30s,
 		},
 	}
 }
@@ -45,19 +43,19 @@ type embedResponse struct {
 func (c *Client) EmbedText(ctx context.Context, text string) (models.Embedding, error) {
 	reqBody := embedTextRequest{Text: text}
 	var resp embedResponse
-	if err := c.doPost(ctx, "/embed/text", reqBody, &resp); err != nil {
+	if err := c.doPost(ctx, constants.PathEmbedText, reqBody, &resp); err != nil {
 		return nil, fmt.Errorf("embed text: %w", err)
 	}
 	return resp.Embedding, nil
 }
 
 func (c *Client) EmbedImageBytes(ctx context.Context, imageBytes []byte) (models.Embedding, error) {
-	if len(imageBytes) > maxImageSize {
-		return nil, fmt.Errorf("image exceeds %d bytes limit", maxImageSize)
+	if len(imageBytes) > constants.MaxImageSize {
+		return nil, fmt.Errorf("image exceeds %d bytes limit", constants.MaxImageSize)
 	}
 	reqBody := embedImageRequest{ImageB64: base64.StdEncoding.EncodeToString(imageBytes)}
 	var resp embedResponse
-	if err := c.doPost(ctx, "/embed/image", reqBody, &resp); err != nil {
+	if err := c.doPost(ctx, constants.PathEmbedImage, reqBody, &resp); err != nil {
 		return nil, fmt.Errorf("embed image: %w", err)
 	}
 	return resp.Embedding, nil
@@ -76,14 +74,14 @@ func (c *Client) EmbedImageURL(ctx context.Context, imageURL string) (models.Emb
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetch image url: status %d", resp.StatusCode)
 	}
-	limited := io.LimitReader(resp.Body, maxImageSize+1)
+	limited := io.LimitReader(resp.Body, constants.MaxImageSize+1)
 	var buf bytes.Buffer
 	n, err := buf.ReadFrom(limited)
 	if err != nil {
 		return nil, fmt.Errorf("read image: %w", err)
 	}
-	if n > maxImageSize {
-		return nil, fmt.Errorf("image exceeds %d bytes limit", maxImageSize)
+	if n > constants.MaxImageSize {
+		return nil, fmt.Errorf("image exceeds %d bytes limit", constants.MaxImageSize)
 	}
 	return c.EmbedImageBytes(ctx, buf.Bytes())
 }
@@ -97,7 +95,7 @@ func (c *Client) doPost(ctx context.Context, path string, reqBody, respBody any)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(constants.HeaderContentType, constants.MIMETypeJSON)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("do request: %w", err)
@@ -119,7 +117,7 @@ func (c *Client) doPost(ctx context.Context, path string, reqBody, respBody any)
 }
 
 func (c *Client) HealthCheck(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+constants.PathHealth, nil)
 	if err != nil {
 		return err
 	}

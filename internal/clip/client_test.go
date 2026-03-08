@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"iris/internal/constants"
 )
 
 func TestClient_HealthCheck(t *testing.T) {
@@ -155,7 +157,7 @@ func TestClient_EmbedText(t *testing.T) {
 func TestClient_EmbedImageBytes(t *testing.T) {
 	t.Run("max size guard", func(t *testing.T) {
 		client := NewClient("http://localhost")
-		_, err := client.EmbedImageBytes(context.Background(), make([]byte, maxImageSize+1))
+		_, err := client.EmbedImageBytes(context.Background(), make([]byte, constants.MaxImageSize+1))
 		if err == nil || !strings.Contains(err.Error(), string("exceeds")) {
 			t.Errorf("expected max-size error")
 		}
@@ -200,8 +202,8 @@ func TestClient_EmbedImageURL(t *testing.T) {
 
 	t.Run("oversize", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Write more than maxImageSize
-			w.Write(make([]byte, maxImageSize+2))
+			// Write more than constants.MaxImageSize
+			w.Write(make([]byte, constants.MaxImageSize+2))
 		}))
 		defer ts.Close()
 		client := NewClient("http://localhost")
