@@ -356,23 +356,33 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 		maxDepth = 1
 	}
 	wait := sourceThrottle(source.RateLimitRPS)
+	robotsClient := crawl.NewRobotsClient(http.DefaultClient, "iris")
 
 	type queueItem struct {
 		url   string
 		depth int
 	}
 	queue := []queueItem{{url: source.SeedURL, depth: 0}}
-	seenPages := map[string]struct{}{}
+	visitedPages := map[string]struct{}{}
+	processedPages := map[string]struct{}{}
 	seenImages := map[string]struct{}{}
 	discovered := 0
 
 	for len(queue) > 0 {
 		item := queue[0]
 		queue = queue[1:]
-		if _, exists := seenPages[item.url]; exists {
+		if _, exists := visitedPages[item.url]; exists {
 			continue
 		}
-		seenPages[item.url] = struct{}{}
+		visitedPages[item.url] = struct{}{}
+
+		allowed, err := robotsClient.Allowed(ctx, item.url)
+		if err != nil {
+			return discovered, err
+		}
+		if !allowed {
+			continue
+		}
 
 		if err := wait(ctx); err != nil {
 			return discovered, err
@@ -386,8 +396,29 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 			return discovered, err
 		}
 
+		pageKey := item.url
+		if discovery.CanonicalURL != "" {
+			pageKey = discovery.CanonicalURL
+			if discovery.CanonicalURL != item.url {
+				if _, exists := visitedPages[discovery.CanonicalURL]; !exists {
+					queue = append(queue, queueItem{url: discovery.CanonicalURL, depth: item.depth})
+				}
+			}
+		}
+		if _, exists := processedPages[pageKey]; exists {
+			continue
+		}
+		processedPages[pageKey] = struct{}{}
+
 		for _, imageURL := range discovery.ImageURLs {
 			if _, exists := seenImages[imageURL]; exists {
+				continue
+			}
+			allowed, err := robotsClient.Allowed(ctx, imageURL)
+			if err != nil {
+				return discovered, err
+			}
+			if !allowed {
 				continue
 			}
 			seenImages[imageURL] = struct{}{}
@@ -401,7 +432,7 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 			continue
 		}
 		for _, pageURL := range discovery.PageURLs {
-			if _, exists := seenPages[pageURL]; exists {
+			if _, exists := visitedPages[pageURL]; exists {
 				continue
 			}
 			queue = append(queue, queueItem{url: pageURL, depth: item.depth + 1})
@@ -413,6 +444,7 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 
 func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source crawl.Source, runID string) (int, error) {
 	wait := sourceThrottle(source.RateLimitRPS)
+	robotsClient := crawl.NewRobotsClient(http.DefaultClient, "iris")
 	if err := wait(ctx); err != nil {
 		return 0, err
 	}
@@ -421,8 +453,22 @@ func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source craw
 		return 0, err
 	}
 	discovered := 0
+	processedPages := map[string]struct{}{}
+	seenImages := map[string]struct{}{}
 	for _, loc := range locs {
+		allowed, err := robotsClient.Allowed(ctx, loc)
+		if err != nil {
+			return discovered, err
+		}
+		if !allowed {
+			continue
+		}
+
 		if crawl.LooksLikeImageURL(loc) {
+			if _, exists := seenImages[loc]; exists {
+				continue
+			}
+			seenImages[loc] = struct{}{}
 			if err := enqueueFetchImage(ctx, jobStore, loc, runID); err != nil {
 				return discovered, err
 			}
@@ -441,7 +487,26 @@ func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source craw
 		if err != nil {
 			return discovered, err
 		}
+		pageKey := loc
+		if discovery.CanonicalURL != "" {
+			pageKey = discovery.CanonicalURL
+		}
+		if _, exists := processedPages[pageKey]; exists {
+			continue
+		}
+		processedPages[pageKey] = struct{}{}
 		for _, imageURL := range discovery.ImageURLs {
+			if _, exists := seenImages[imageURL]; exists {
+				continue
+			}
+			allowed, err := robotsClient.Allowed(ctx, imageURL)
+			if err != nil {
+				return discovered, err
+			}
+			if !allowed {
+				continue
+			}
+			seenImages[imageURL] = struct{}{}
 			if err := enqueueFetchImage(ctx, jobStore, imageURL, runID); err != nil {
 				return discovered, err
 			}
