@@ -21,6 +21,7 @@ func TestLoadServerDefaults(t *testing.T) {
 	t.Setenv("JOB_BACKEND", "")
 	t.Setenv("JOB_STORE_DSN", "")
 	t.Setenv("ADMIN_API_KEY", "")
+	t.Setenv("ADMIN_READONLY_API_KEYS", "")
 
 	cfg := LoadServer()
 
@@ -65,6 +66,22 @@ func TestLoadServerDefaults(t *testing.T) {
 	}
 	if cfg.AdminAPIKey != defaultAdminAPIKey {
 		t.Fatalf("expected default admin api key, got %q", cfg.AdminAPIKey)
+	}
+	if len(cfg.AdminReadOnlyAPIKeys) != 0 {
+		t.Fatalf("expected no readonly admin api keys, got %v", cfg.AdminReadOnlyAPIKeys)
+	}
+}
+
+func TestLoadServerReadOnlyAdminKeys(t *testing.T) {
+	t.Setenv("ADMIN_READONLY_API_KEYS", "viewer-1, viewer-2 ,viewer-3")
+
+	cfg := LoadServer()
+
+	if len(cfg.AdminReadOnlyAPIKeys) != 3 {
+		t.Fatalf("expected 3 readonly keys, got %d", len(cfg.AdminReadOnlyAPIKeys))
+	}
+	if cfg.AdminReadOnlyAPIKeys[1] != "viewer-2" {
+		t.Fatalf("unexpected readonly key parsing: %v", cfg.AdminReadOnlyAPIKeys)
 	}
 }
 

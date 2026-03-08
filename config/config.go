@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,10 +62,11 @@ type Shared struct {
 
 type Server struct {
 	Shared
-	HTTPAddr    string
-	JobBackend  string
-	JobStoreDSN string
-	AdminAPIKey string
+	HTTPAddr             string
+	JobBackend           string
+	JobStoreDSN          string
+	AdminAPIKey          string
+	AdminReadOnlyAPIKeys []string
 }
 
 type Indexer struct {
@@ -113,6 +115,7 @@ func LoadServer() Server {
 			"ADMIN_API_KEY",
 			defaultAdminAPIKey,
 		),
+		AdminReadOnlyAPIKeys: getEnvCSV("ADMIN_READONLY_API_KEYS"),
 	}
 }
 
@@ -309,4 +312,23 @@ func getEnvBool(key string, def bool) bool {
 		return def
 	}
 	return parsed
+}
+
+func getEnvCSV(key string) []string {
+	value, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

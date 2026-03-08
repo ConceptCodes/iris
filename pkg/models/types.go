@@ -50,13 +50,15 @@ type ErrorResponse struct {
 }
 
 type CrawlSourceRequest struct {
-	Kind           string   `json:"kind"`
-	SeedURL        string   `json:"seed_url,omitempty"`
-	LocalPath      string   `json:"local_path,omitempty"`
-	MaxDepth       int      `json:"max_depth,omitempty"`
-	RateLimitRPS   int      `json:"rate_limit_rps,omitempty"`
-	AllowedDomains []string `json:"allowed_domains,omitempty"`
-	ScheduleEvery  string   `json:"schedule_every,omitempty"`
+	Kind            string   `json:"kind"`
+	SeedURL         string   `json:"seed_url,omitempty"`
+	LocalPath       string   `json:"local_path,omitempty"`
+	MaxDepth        int      `json:"max_depth,omitempty"`
+	RateLimitRPS    int      `json:"rate_limit_rps,omitempty"`
+	MaxPagesPerRun  int      `json:"max_pages_per_run,omitempty"`
+	MaxImagesPerRun int      `json:"max_images_per_run,omitempty"`
+	AllowedDomains  []string `json:"allowed_domains,omitempty"`
+	ScheduleEvery   string   `json:"schedule_every,omitempty"`
 }
 
 type CrawlSourceResponse struct {
