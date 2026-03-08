@@ -236,6 +236,47 @@ curl -H 'X-Admin-Key: dev-admin-key' http://localhost:8080/admin/runs
 curl -H 'X-Admin-Key: dev-admin-key' http://localhost:8080/admin/runs/<run-id>
 ```
 
+### Bulk re-index images
+
+Trigger bulk re-embedding of existing images for model upgrades or changes:
+
+```bash
+# Re-index all images
+curl -X POST http://localhost:8080/admin/reindex \
+  -H 'Content-Type: application/json' \
+  -H 'X-Admin-Key: dev-admin-key' \
+  -d '{}'
+
+# Re-index images from a specific source
+curl -X POST http://localhost:8080/admin/reindex \
+  -H 'Content-Type: application/json' \
+  -H 'X-Admin-Key: dev-admin-key' \
+  -d '{
+    "source_id": "source-123",
+    "limit": 50
+  }'
+
+# Re-index images from a specific run
+curl -X POST http://localhost:8080/admin/reindex \
+  -H 'Content-Type: application/json' \
+  -H 'X-Admin-Key: dev-admin-key' \
+  -d '{
+    "run_id": "run-456",
+    "limit": 100
+  }'
+```
+
+Response:
+
+```json
+{
+  "enqueued_count": 42,
+  "errors": []
+}
+```
+
+This endpoint enqueues `reindex_image` jobs for the worker to process. Images are fetched from their source URLs and re-embedded with the current CLIP model.
+
 ## CLI Indexing
 
 ```bash
