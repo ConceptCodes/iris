@@ -263,6 +263,34 @@ func buildFilterConditions(filters map[string]string) []*pb.Condition {
 	return conditions
 }
 
+func (s *QdrantStore) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
+	if limit == 0 {
+		limit = 100
+	}
+	var filter *pb.Filter
+	if len(filters) > 0 {
+		conditions := buildFilterConditions(filters)
+		filter = &pb.Filter{Must: conditions}
+	}
+	resp, err := s.points.Scroll(ctx, &pb.ScrollPoints{
+		CollectionName: collectionName,
+		Filter:         filter,
+		Limit:          &limit,
+		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scroll: %w", err)
+	}
+	records := make([]models.ImageRecord, 0, len(resp.GetResult()))
+	for _, point := range resp.GetResult() {
+		if payload := point.GetPayload(); payload != nil {
+			record := s.payloadToRecord(payload)
+			records = append(records, record)
+		}
+	}
+	return records, nil
+}
+
 func (s *QdrantStore) Close() error {
 	return s.conn.Close()
 }
