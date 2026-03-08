@@ -139,6 +139,10 @@ func extractSitemapLocs(r io.Reader) ([]string, error) {
 	return nil, fmt.Errorf("unsupported sitemap format")
 }
 
+func ExtractSitemapLocs(r io.Reader) ([]string, error) {
+	return extractSitemapLocs(r)
+}
+
 func FetchSitemapLocs(ctx context.Context, sitemapURL string) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sitemapURL, nil)
 	if err != nil {
@@ -167,8 +171,7 @@ func resolveHTTPURL(base *url.URL, raw string, allowedDomains []string) (string,
 	if len(allowedDomains) > 0 && !hostAllowed(resolved.Hostname(), allowedDomains) {
 		return "", false
 	}
-	resolved.Fragment = ""
-	return resolved.String(), true
+	return normalizeURL(resolved), true
 }
 
 func hostAllowed(host string, allowedDomains []string) bool {

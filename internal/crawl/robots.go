@@ -2,28 +2,24 @@ package crawl
 
 import (
 	"bufio"
+	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
+	"time"
 )
 
 const defaultCrawlerUserAgent = "iris"
 
 type RobotsClient struct {
-	client    *http.Client
+	fetcher   *CachedFetcher
 	userAgent string
-
-	mu     sync.Mutex
-	cached map[string]robotsPolicy
 }
 
 type robotsPolicy struct {
-	fetchErr error
-	groups   []robotsGroup
+	groups []robotsGroup
 }
 
 type robotsGroup struct {
@@ -38,29 +34,35 @@ type robotsRule struct {
 }
 
 func NewRobotsClient(client *http.Client, userAgent string) *RobotsClient {
-	if client == nil {
-		client = http.DefaultClient
-	}
+	return NewRobotsClientWithOptions(client, userAgent, FetcherOptions{
+		DefaultTTL:      24 * time.Hour,
+		HostConcurrency: 2,
+	})
+}
+
+func NewRobotsClientWithOptions(client *http.Client, userAgent string, options FetcherOptions) *RobotsClient {
 	userAgent = strings.TrimSpace(strings.ToLower(userAgent))
 	if userAgent == "" {
 		userAgent = defaultCrawlerUserAgent
 	}
+	if options.DefaultTTL <= 0 {
+		options.DefaultTTL = 24 * time.Hour
+	}
 	return &RobotsClient{
-		client:    client,
+		fetcher:   NewCachedFetcher(client, userAgent, options),
 		userAgent: userAgent,
-		cached:    make(map[string]robotsPolicy),
 	}
 }
 
 func (c *RobotsClient) Allowed(ctx context.Context, rawURL string) (bool, error) {
-	parsed, err := url.Parse(rawURL)
+	normalizedURL, err := NormalizeURL(rawURL)
 	if err != nil {
 		return false, err
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return false, fmt.Errorf("unsupported url scheme: %s", parsed.Scheme)
+	parsed, err := url.Parse(normalizedURL)
+	if err != nil {
+		return false, err
 	}
-
 	policy, err := c.policyFor(ctx, parsed)
 	if err != nil {
 		return false, err
@@ -70,49 +72,15 @@ func (c *RobotsClient) Allowed(ctx context.Context, rawURL string) (bool, error)
 
 func (c *RobotsClient) policyFor(ctx context.Context, target *url.URL) (robotsPolicy, error) {
 	origin := target.Scheme + "://" + target.Host
-
-	c.mu.Lock()
-	if policy, ok := c.cached[origin]; ok {
-		c.mu.Unlock()
-		return policy, policy.fetchErr
-	}
-	c.mu.Unlock()
-
-	policy, err := c.fetchPolicy(ctx, origin)
-
-	c.mu.Lock()
-	c.cached[origin] = policy
-	c.mu.Unlock()
-
-	return policy, err
-}
-
-func (c *RobotsClient) fetchPolicy(ctx context.Context, origin string) (robotsPolicy, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, origin+"/robots.txt", nil)
+	result, err := c.fetcher.Fetch(ctx, origin+"/robots.txt")
 	if err != nil {
+		normalizedErr := strings.ToLower(err.Error())
+		if strings.Contains(normalizedErr, "status 404") || strings.Contains(normalizedErr, "status 410") {
+			return robotsPolicy{}, nil
+		}
 		return robotsPolicy{}, err
 	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return robotsPolicy{fetchErr: err}, err
-	}
-	defer resp.Body.Close()
-
-	switch {
-	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		policy, parseErr := parseRobots(resp.Body)
-		if parseErr != nil {
-			return robotsPolicy{fetchErr: parseErr}, parseErr
-		}
-		return policy, nil
-	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-		err := fmt.Errorf("robots unavailable: status %d", resp.StatusCode)
-		return robotsPolicy{fetchErr: err}, err
-	case resp.StatusCode >= 400:
-		return robotsPolicy{}, nil
-	default:
-		return robotsPolicy{}, nil
-	}
+	return parseRobots(bytes.NewReader(result.Body))
 }
 
 func (p robotsPolicy) allows(userAgent, path string) bool {

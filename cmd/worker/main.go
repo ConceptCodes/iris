@@ -27,6 +27,12 @@ import (
 	"iris/pkg/models"
 )
 
+type crawlerRuntime struct {
+	fetcher    *crawl.CachedFetcher
+	robots     *crawl.RobotsClient
+	cacheStore crawl.CacheStore
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -151,6 +157,13 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	}
 	defer crawlStore.Close()
 
+	runtime, err := newCrawlerRuntime(cfg)
+	if err != nil {
+		return err
+	}
+	defer runtime.close()
+	go runtime.runCachePruneLoop(ctx, cfg)
+
 	ticker := time.NewTicker(cfg.JobPollInterval)
 	defer ticker.Stop()
 
@@ -168,7 +181,7 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 			}
 		}
 
-		if err := handleCrawlerJob(ctx, cfg, jobStore, crawlStore, job); err != nil {
+		if err := handleCrawlerJob(ctx, cfg, runtime, jobStore, crawlStore, job); err != nil {
 			slog.Error("crawler job failed", "job_id", job.ID, "error", err)
 			if _, markErr := jobStore.MarkFailed(ctx, job.ID, err, time.Now().UTC().Add(cfg.JobPollInterval)); markErr != nil {
 				return markErr
@@ -207,7 +220,7 @@ func handleIndexerJob(ctx context.Context, pipeline *indexing.Pipeline, job jobs
 	}
 }
 
-func handleCrawlerJob(ctx context.Context, cfg config.Worker, jobStore jobs.Store, crawlStore crawl.Store, job jobs.Job) error {
+func handleCrawlerJob(ctx context.Context, cfg config.Worker, runtime *crawlerRuntime, jobStore jobs.Store, crawlStore crawl.Store, job jobs.Job) error {
 	var payload jobs.DiscoverSourcePayload
 	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
 		return err
@@ -240,7 +253,7 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, jobStore jobs.Stor
 		}
 		return crawlStore.MarkRunCompleted(ctx, payload.RunID)
 	case crawl.SourceKindDomain:
-		discovered, err := discoverDomainSource(ctx, jobStore, source, payload.RunID)
+		discovered, err := discoverDomainSource(ctx, cfg, runtime, jobStore, source, payload.RunID)
 		if err != nil {
 			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 			return err
@@ -250,7 +263,7 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, jobStore jobs.Stor
 		}
 		return crawlStore.MarkRunCompleted(ctx, payload.RunID)
 	case crawl.SourceKindSitemap:
-		discovered, err := discoverSitemapSource(ctx, jobStore, source, payload.RunID)
+		discovered, err := discoverSitemapSource(ctx, cfg, runtime, jobStore, source, payload.RunID)
 		if err != nil {
 			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 			return err
@@ -263,6 +276,78 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, jobStore jobs.Stor
 		err := fmt.Errorf("source kind %s not implemented in crawler", source.Kind)
 		_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 		return err
+	}
+}
+
+func newCrawlerRuntime(cfg config.Worker) (*crawlerRuntime, error) {
+	cacheStore, err := newCacheStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	fetcherOptions := crawl.FetcherOptions{
+		DefaultTTL:      cfg.HTTPCacheTTL,
+		Retries:         cfg.FetchRetries,
+		RetryBackoff:    cfg.FetchRetryBackoff,
+		HostConcurrency: cfg.HostConcurrency,
+		Store:           cacheStore,
+	}
+	robotsOptions := crawl.FetcherOptions{
+		DefaultTTL:      cfg.RobotsCacheTTL,
+		Retries:         cfg.FetchRetries,
+		RetryBackoff:    cfg.FetchRetryBackoff,
+		HostConcurrency: cfg.HostConcurrency,
+		Store:           cacheStore,
+	}
+	return &crawlerRuntime{
+		fetcher:    crawl.NewCachedFetcher(http.DefaultClient, "iris", fetcherOptions),
+		robots:     crawl.NewRobotsClientWithOptions(http.DefaultClient, "iris", robotsOptions),
+		cacheStore: cacheStore,
+	}, nil
+}
+
+func newCacheStore(cfg config.Worker) (crawl.CacheStore, error) {
+	switch cfg.JobBackend {
+	case "memory":
+		return crawl.NewNoopCacheStore(), nil
+	case "postgres":
+		return crawl.NewPostgresCacheStore(context.Background(), cfg.JobStoreDSN)
+	default:
+		return nil, fmt.Errorf("unsupported crawl cache backend: %s", cfg.JobBackend)
+	}
+}
+
+func (r *crawlerRuntime) close() error {
+	if r == nil || r.cacheStore == nil {
+		return nil
+	}
+	return r.cacheStore.Close()
+}
+
+func (r *crawlerRuntime) runCachePruneLoop(ctx context.Context, cfg config.Worker) {
+	if r == nil || r.cacheStore == nil || cfg.CachePruneInterval <= 0 {
+		return
+	}
+	if _, err := r.cacheStore.PruneExpired(ctx, time.Now().UTC(), cfg.CachePruneBatch); err != nil {
+		slog.Warn("crawl cache prune failed", "error", err)
+	}
+
+	ticker := time.NewTicker(cfg.CachePruneInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pruned, err := r.cacheStore.PruneExpired(ctx, time.Now().UTC(), cfg.CachePruneBatch)
+			if err != nil {
+				slog.Warn("crawl cache prune failed", "error", err)
+				continue
+			}
+			if pruned > 0 {
+				slog.Info("crawl cache pruned", "rows", pruned)
+			}
+		}
 	}
 }
 
@@ -326,13 +411,17 @@ func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, run
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		payload, err := json.Marshal(jobs.FetchImagePayload{URL: line, RunID: runID})
+		normalizedURL, err := crawl.NormalizeURL(line)
+		if err != nil {
+			continue
+		}
+		payload, err := json.Marshal(jobs.FetchImagePayload{URL: normalizedURL, RunID: runID})
 		if err != nil {
 			return count, err
 		}
 		if _, err := jobStore.Enqueue(ctx, jobs.Job{
 			Type:        jobs.TypeFetchImage,
-			DedupKey:    dedupKey("fetch_image", runID, line),
+			DedupKey:    dedupKey("fetch_image", runID, normalizedURL),
 			PayloadJSON: payload,
 		}); err != nil {
 			return count, err
@@ -342,7 +431,7 @@ func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, run
 	return count, nil
 }
 
-func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl.Source, runID string) (int, error) {
+func discoverDomainSource(ctx context.Context, cfg config.Worker, runtime *crawlerRuntime, jobStore jobs.Store, source crawl.Source, runID string) (int, error) {
 	seed, err := url.Parse(source.SeedURL)
 	if err != nil {
 		return 0, err
@@ -356,13 +445,16 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 		maxDepth = 1
 	}
 	wait := sourceThrottle(source.RateLimitRPS)
-	robotsClient := crawl.NewRobotsClient(http.DefaultClient, "iris")
 
 	type queueItem struct {
 		url   string
 		depth int
 	}
-	queue := []queueItem{{url: source.SeedURL, depth: 0}}
+	normalizedSeedURL, err := crawl.NormalizeURL(source.SeedURL)
+	if err != nil {
+		return 0, err
+	}
+	queue := []queueItem{{url: normalizedSeedURL, depth: 0}}
 	visitedPages := map[string]struct{}{}
 	processedPages := map[string]struct{}{}
 	seenImages := map[string]struct{}{}
@@ -376,7 +468,7 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 		}
 		visitedPages[item.url] = struct{}{}
 
-		allowed, err := robotsClient.Allowed(ctx, item.url)
+		allowed, err := runtime.robots.Allowed(ctx, item.url)
 		if err != nil {
 			return discovered, err
 		}
@@ -387,19 +479,19 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 		if err := wait(ctx); err != nil {
 			return discovered, err
 		}
-		resp, err := fetchURL(ctx, item.url)
+		result, err := runtime.fetcher.Fetch(ctx, item.url)
 		if err != nil {
 			return discovered, err
 		}
-		discovery, err := crawl.ExtractHTMLLinks(resp, item.url, allowedDomains)
+		discovery, err := crawl.ExtractHTMLLinks(strings.NewReader(string(result.Body)), result.URL, allowedDomains)
 		if err != nil {
 			return discovered, err
 		}
 
-		pageKey := item.url
+		pageKey := result.URL
 		if discovery.CanonicalURL != "" {
 			pageKey = discovery.CanonicalURL
-			if discovery.CanonicalURL != item.url {
+			if discovery.CanonicalURL != result.URL {
 				if _, exists := visitedPages[discovery.CanonicalURL]; !exists {
 					queue = append(queue, queueItem{url: discovery.CanonicalURL, depth: item.depth})
 				}
@@ -414,7 +506,7 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 			if _, exists := seenImages[imageURL]; exists {
 				continue
 			}
-			allowed, err := robotsClient.Allowed(ctx, imageURL)
+			allowed, err := runtime.robots.Allowed(ctx, imageURL)
 			if err != nil {
 				return discovered, err
 			}
@@ -442,13 +534,16 @@ func discoverDomainSource(ctx context.Context, jobStore jobs.Store, source crawl
 	return discovered, nil
 }
 
-func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source crawl.Source, runID string) (int, error) {
+func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *crawlerRuntime, jobStore jobs.Store, source crawl.Source, runID string) (int, error) {
 	wait := sourceThrottle(source.RateLimitRPS)
-	robotsClient := crawl.NewRobotsClient(http.DefaultClient, "iris")
 	if err := wait(ctx); err != nil {
 		return 0, err
 	}
-	locs, err := crawl.FetchSitemapLocs(ctx, source.SeedURL)
+	sitemapResult, err := runtime.fetcher.Fetch(ctx, source.SeedURL)
+	if err != nil {
+		return 0, err
+	}
+	locs, err := crawl.ExtractSitemapLocs(strings.NewReader(string(sitemapResult.Body)))
 	if err != nil {
 		return 0, err
 	}
@@ -456,7 +551,11 @@ func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source craw
 	processedPages := map[string]struct{}{}
 	seenImages := map[string]struct{}{}
 	for _, loc := range locs {
-		allowed, err := robotsClient.Allowed(ctx, loc)
+		normalizedLoc, err := crawl.NormalizeURL(loc)
+		if err != nil {
+			continue
+		}
+		allowed, err := runtime.robots.Allowed(ctx, loc)
 		if err != nil {
 			return discovered, err
 		}
@@ -464,12 +563,12 @@ func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source craw
 			continue
 		}
 
-		if crawl.LooksLikeImageURL(loc) {
-			if _, exists := seenImages[loc]; exists {
+		if crawl.LooksLikeImageURL(normalizedLoc) {
+			if _, exists := seenImages[normalizedLoc]; exists {
 				continue
 			}
-			seenImages[loc] = struct{}{}
-			if err := enqueueFetchImage(ctx, jobStore, loc, runID); err != nil {
+			seenImages[normalizedLoc] = struct{}{}
+			if err := enqueueFetchImage(ctx, jobStore, normalizedLoc, runID); err != nil {
 				return discovered, err
 			}
 			discovered++
@@ -479,15 +578,15 @@ func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source craw
 		if err := wait(ctx); err != nil {
 			return discovered, err
 		}
-		resp, err := fetchURL(ctx, loc)
+		result, err := runtime.fetcher.Fetch(ctx, normalizedLoc)
 		if err != nil {
 			return discovered, err
 		}
-		discovery, err := crawl.ExtractHTMLLinks(resp, loc, source.AllowedDomains)
+		discovery, err := crawl.ExtractHTMLLinks(strings.NewReader(string(result.Body)), result.URL, source.AllowedDomains)
 		if err != nil {
 			return discovered, err
 		}
-		pageKey := loc
+		pageKey := result.URL
 		if discovery.CanonicalURL != "" {
 			pageKey = discovery.CanonicalURL
 		}
@@ -499,7 +598,7 @@ func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source craw
 			if _, exists := seenImages[imageURL]; exists {
 				continue
 			}
-			allowed, err := robotsClient.Allowed(ctx, imageURL)
+			allowed, err := runtime.robots.Allowed(ctx, imageURL)
 			if err != nil {
 				return discovered, err
 			}
@@ -516,30 +615,18 @@ func discoverSitemapSource(ctx context.Context, jobStore jobs.Store, source craw
 	return discovered, nil
 }
 
-func fetchURL(ctx context.Context, rawURL string) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("fetch %s: status %d", rawURL, resp.StatusCode)
-	}
-	return resp.Body, nil
-}
-
 func enqueueFetchImage(ctx context.Context, jobStore jobs.Store, imageURL, runID string) error {
-	payload, err := json.Marshal(jobs.FetchImagePayload{URL: imageURL, RunID: runID})
+	normalizedURL, err := crawl.NormalizeURL(imageURL)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(jobs.FetchImagePayload{URL: normalizedURL, RunID: runID})
 	if err != nil {
 		return err
 	}
 	_, err = jobStore.Enqueue(ctx, jobs.Job{
 		Type:        jobs.TypeFetchImage,
-		DedupKey:    dedupKey("fetch_image", runID, imageURL),
+		DedupKey:    dedupKey("fetch_image", runID, normalizedURL),
 		PayloadJSON: payload,
 	})
 	return err
