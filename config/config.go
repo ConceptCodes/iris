@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"time"
 )
 
 const (
@@ -12,6 +13,13 @@ const (
 	defaultHTTPAddr    = ":8080"
 	defaultConcurrency = 4
 	defaultAssetDir    = "./data/assets"
+	defaultWorkerMode  = "indexer"
+	defaultJobBackend  = "memory"
+)
+
+const (
+	WorkerModeIndexer = "indexer"
+	WorkerModeCrawler = "crawler"
 )
 
 type Shared struct {
@@ -31,6 +39,14 @@ type Indexer struct {
 	Concurrency int
 }
 
+type Worker struct {
+	Shared
+	Mode            string
+	JobBackend      string
+	JobPollInterval time.Duration
+	LeaseDuration   time.Duration
+}
+
 func LoadServer() Server {
 	return Server{
 		Shared: loadShared(),
@@ -47,6 +63,22 @@ func LoadIndexer() Indexer {
 		Concurrency: getEnvInt(
 			"CONCURRENCY",
 			defaultConcurrency,
+		),
+	}
+}
+
+func LoadWorker() Worker {
+	return Worker{
+		Shared:     loadShared(),
+		Mode:       getEnv("WORKER_MODE", defaultWorkerMode),
+		JobBackend: getEnv("JOB_BACKEND", defaultJobBackend),
+		JobPollInterval: getEnvDuration(
+			"JOB_POLL_INTERVAL",
+			time.Second,
+		),
+		LeaseDuration: getEnvDuration(
+			"LEASE_DURATION",
+			30*time.Second,
 		),
 	}
 }
@@ -86,6 +118,18 @@ func getEnvInt(key string, def int) int {
 	}
 
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return def
+	}
+	return parsed
+}
+
+func getEnvDuration(key string, def time.Duration) time.Duration {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return def
+	}
+	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return def
 	}
