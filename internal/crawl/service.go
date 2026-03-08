@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"iris/internal/jobs"
 )
@@ -33,6 +34,11 @@ func (s *Service) CreateSource(ctx context.Context, input CreateSourceInput) (So
 	default:
 		return Source{}, fmt.Errorf("unsupported source kind: %s", input.Kind)
 	}
+	if input.ScheduleEvery != "" {
+		if _, err := time.ParseDuration(input.ScheduleEvery); err != nil {
+			return Source{}, fmt.Errorf("invalid schedule_every: %w", err)
+		}
+	}
 	return s.store.CreateSource(ctx, input)
 }
 
@@ -44,7 +50,7 @@ func (s *Service) TriggerRun(ctx context.Context, sourceID, trigger string) (Run
 	if err != nil {
 		return Run{}, err
 	}
-	run, err := s.store.CreateRun(ctx, source.ID, trigger)
+	run, err := s.store.CreateRun(ctx, source.ID, trigger, time.Now().UTC())
 	if err != nil {
 		return Run{}, err
 	}
@@ -59,6 +65,35 @@ func (s *Service) TriggerRun(ctx context.Context, sourceID, trigger string) (Run
 		return Run{}, err
 	}
 	return run, nil
+}
+
+func (s *Service) TriggerRunForSource(ctx context.Context, source Source, trigger string, scheduledAt time.Time) (Run, error) {
+	if trigger == "" {
+		trigger = "scheduled"
+	}
+	run, err := s.store.CreateRun(ctx, source.ID, trigger, scheduledAt)
+	if err != nil {
+		return Run{}, err
+	}
+	payload, err := json.Marshal(jobs.DiscoverSourcePayload{
+		SourceID: source.ID,
+		RunID:    run.ID,
+	})
+	if err != nil {
+		return Run{}, err
+	}
+	if _, err := s.jobStore.Enqueue(ctx, jobs.Job{Type: jobs.TypeDiscoverSource, PayloadJSON: payload}); err != nil {
+		return Run{}, err
+	}
+	return run, nil
+}
+
+func (s *Service) DueSources(ctx context.Context, now time.Time) ([]Source, error) {
+	return s.store.ListSourcesDue(ctx, now)
+}
+
+func (s *Service) SetSourceNextRun(ctx context.Context, id string, next time.Time) error {
+	return s.store.UpdateSourceNextRun(ctx, id, next)
 }
 
 func (s *Service) ListRuns(ctx context.Context) ([]Run, error) {

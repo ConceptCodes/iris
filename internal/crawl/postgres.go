@@ -37,6 +37,7 @@ func NewPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
 
 func (s *PostgresStore) CreateSource(ctx context.Context, input CreateSourceInput) (Source, error) {
 	now := time.Now().UTC()
+	scheduleEvery, _ := time.ParseDuration(input.ScheduleEvery)
 	source := Source{
 		ID:             uuid.NewString(),
 		Kind:           input.Kind,
@@ -46,6 +47,8 @@ func (s *PostgresStore) CreateSource(ctx context.Context, input CreateSourceInpu
 		MaxDepth:       input.MaxDepth,
 		RateLimitRPS:   input.RateLimitRPS,
 		AllowedDomains: append([]string(nil), input.AllowedDomains...),
+		ScheduleEvery:  scheduleEvery,
+		NextRunAt:      nextRunTime(now, scheduleEvery),
 		CreatedAt:      now,
 	}
 	domainsJSON, err := json.Marshal(source.AllowedDomains)
@@ -54,9 +57,9 @@ func (s *PostgresStore) CreateSource(ctx context.Context, input CreateSourceInpu
 	}
 	_, err = s.db.ExecContext(
 		ctx,
-		`INSERT INTO crawl_sources (id, kind, seed_url, local_path, status, max_depth, rate_limit_rps, allowed_domains, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		source.ID, string(source.Kind), source.SeedURL, source.LocalPath, string(source.Status), source.MaxDepth, source.RateLimitRPS, domainsJSON, source.CreatedAt,
+		`INSERT INTO crawl_sources (id, kind, seed_url, local_path, status, max_depth, rate_limit_rps, allowed_domains, schedule_every_seconds, next_run_at, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		source.ID, string(source.Kind), source.SeedURL, source.LocalPath, string(source.Status), source.MaxDepth, source.RateLimitRPS, domainsJSON, int64(scheduleEvery.Seconds()), source.NextRunAt, source.CreatedAt,
 	)
 	if err != nil {
 		return Source{}, fmt.Errorf("create source: %w", err)
@@ -65,25 +68,26 @@ func (s *PostgresStore) CreateSource(ctx context.Context, input CreateSourceInpu
 }
 
 func (s *PostgresStore) GetSource(ctx context.Context, id string) (Source, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, kind, seed_url, local_path, status, max_depth, rate_limit_rps, allowed_domains, created_at FROM crawl_sources WHERE id = $1`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, kind, seed_url, local_path, status, max_depth, rate_limit_rps, allowed_domains, schedule_every_seconds, next_run_at, created_at FROM crawl_sources WHERE id = $1`, id)
 	return scanSource(row)
 }
 
-func (s *PostgresStore) CreateRun(ctx context.Context, sourceID, trigger string) (Run, error) {
+func (s *PostgresStore) CreateRun(ctx context.Context, sourceID, trigger string, scheduledAt time.Time) (Run, error) {
 	now := time.Now().UTC()
 	run := Run{
-		ID:        uuid.NewString(),
-		SourceID:  sourceID,
-		Trigger:   trigger,
-		Status:    RunStatusRunning,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          uuid.NewString(),
+		SourceID:    sourceID,
+		Trigger:     trigger,
+		Status:      RunStatusRunning,
+		ScheduledAt: scheduledAt,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO crawl_runs (id, source_id, trigger, status, discovered_count, indexed_count, failed_count, last_error, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,0,0,0,'',$5,$5)`,
-		run.ID, run.SourceID, run.Trigger, string(run.Status), run.CreatedAt,
+		`INSERT INTO crawl_runs (id, source_id, trigger, status, discovered_count, indexed_count, failed_count, last_error, scheduled_at, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,0,0,0,'',$5,$6,$6)`,
+		run.ID, run.SourceID, run.Trigger, string(run.Status), run.ScheduledAt, run.CreatedAt,
 	)
 	if err != nil {
 		return Run{}, fmt.Errorf("create run: %w", err)
@@ -92,7 +96,7 @@ func (s *PostgresStore) CreateRun(ctx context.Context, sourceID, trigger string)
 }
 
 func (s *PostgresStore) ListRuns(ctx context.Context) ([]Run, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, source_id, trigger, status, discovered_count, indexed_count, failed_count, last_error, created_at, updated_at FROM crawl_runs ORDER BY created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, source_id, trigger, status, discovered_count, indexed_count, failed_count, last_error, scheduled_at, created_at, updated_at FROM crawl_runs ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
 	}
@@ -110,7 +114,7 @@ func (s *PostgresStore) ListRuns(ctx context.Context) ([]Run, error) {
 }
 
 func (s *PostgresStore) GetRun(ctx context.Context, id string) (Run, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, source_id, trigger, status, discovered_count, indexed_count, failed_count, last_error, created_at, updated_at FROM crawl_runs WHERE id = $1`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, source_id, trigger, status, discovered_count, indexed_count, failed_count, last_error, scheduled_at, created_at, updated_at FROM crawl_runs WHERE id = $1`, id)
 	return scanRun(row)
 }
 
@@ -178,6 +182,8 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			max_depth INTEGER NOT NULL DEFAULT 0,
 			rate_limit_rps INTEGER NOT NULL DEFAULT 0,
 			allowed_domains JSONB NOT NULL DEFAULT '[]'::jsonb,
+			schedule_every_seconds BIGINT NOT NULL DEFAULT 0,
+			next_run_at TIMESTAMPTZ NULL,
 			created_at TIMESTAMPTZ NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS crawl_runs (
@@ -189,6 +195,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			indexed_count INTEGER NOT NULL DEFAULT 0,
 			failed_count INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT NOT NULL DEFAULT '',
+			scheduled_at TIMESTAMPTZ NULL,
 			created_at TIMESTAMPTZ NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL
 		);
@@ -205,21 +212,51 @@ func scanSource(row rowScanner) (Source, error) {
 	var source Source
 	var kind, status string
 	var domainsJSON []byte
-	if err := row.Scan(&source.ID, &kind, &source.SeedURL, &source.LocalPath, &status, &source.MaxDepth, &source.RateLimitRPS, &domainsJSON, &source.CreatedAt); err != nil {
+	var scheduleSeconds int64
+	if err := row.Scan(&source.ID, &kind, &source.SeedURL, &source.LocalPath, &status, &source.MaxDepth, &source.RateLimitRPS, &domainsJSON, &scheduleSeconds, &source.NextRunAt, &source.CreatedAt); err != nil {
 		return Source{}, err
 	}
 	source.Kind = SourceKind(kind)
 	source.Status = SourceStatus(status)
 	_ = json.Unmarshal(domainsJSON, &source.AllowedDomains)
+	if scheduleSeconds > 0 {
+		source.ScheduleEvery = time.Duration(scheduleSeconds) * time.Second
+	}
 	return source, nil
 }
 
 func scanRun(row rowScanner) (Run, error) {
 	var run Run
 	var status string
-	if err := row.Scan(&run.ID, &run.SourceID, &run.Trigger, &status, &run.DiscoveredCount, &run.IndexedCount, &run.FailedCount, &run.LastError, &run.CreatedAt, &run.UpdatedAt); err != nil {
+	if err := row.Scan(&run.ID, &run.SourceID, &run.Trigger, &status, &run.DiscoveredCount, &run.IndexedCount, &run.FailedCount, &run.LastError, &run.ScheduledAt, &run.CreatedAt, &run.UpdatedAt); err != nil {
 		return Run{}, err
 	}
 	run.Status = RunStatus(status)
 	return run, nil
+}
+
+func (s *PostgresStore) ListSourcesDue(ctx context.Context, now time.Time) ([]Source, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, kind, seed_url, local_path, status, max_depth, rate_limit_rps, allowed_domains, schedule_every_seconds, next_run_at, created_at FROM crawl_sources WHERE status = $1 AND schedule_every_seconds > 0 AND (next_run_at IS NULL OR next_run_at <= $2)`, string(SourceStatusActive), now)
+	if err != nil {
+		return nil, fmt.Errorf("list due sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []Source
+	for rows.Next() {
+		source, err := scanSource(rows)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, source)
+	}
+	return sources, rows.Err()
+}
+
+func (s *PostgresStore) UpdateSourceNextRun(ctx context.Context, id string, next time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE crawl_sources SET next_run_at = $2 WHERE id = $1`, id, next)
+	if err != nil {
+		return fmt.Errorf("update next run: %w", err)
+	}
+	return nil
 }

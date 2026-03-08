@@ -25,6 +25,7 @@ func (s *MemoryStore) CreateSource(ctx context.Context, input CreateSourceInput)
 	defer s.mu.Unlock()
 
 	now := time.Now().UTC()
+	scheduleEvery, _ := time.ParseDuration(input.ScheduleEvery)
 	source := Source{
 		ID:             uuid.NewString(),
 		Kind:           input.Kind,
@@ -34,6 +35,8 @@ func (s *MemoryStore) CreateSource(ctx context.Context, input CreateSourceInput)
 		MaxDepth:       input.MaxDepth,
 		RateLimitRPS:   input.RateLimitRPS,
 		AllowedDomains: slices.Clone(input.AllowedDomains),
+		ScheduleEvery:  scheduleEvery,
+		NextRunAt:      nextRunTime(now, scheduleEvery),
 		CreatedAt:      now,
 	}
 	s.sources = append(s.sources, source)
@@ -52,18 +55,19 @@ func (s *MemoryStore) GetSource(ctx context.Context, id string) (Source, error) 
 	return Source{}, fmt.Errorf("source not found: %s", id)
 }
 
-func (s *MemoryStore) CreateRun(ctx context.Context, sourceID, trigger string) (Run, error) {
+func (s *MemoryStore) CreateRun(ctx context.Context, sourceID, trigger string, scheduledAt time.Time) (Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now().UTC()
 	run := Run{
-		ID:        uuid.NewString(),
-		SourceID:  sourceID,
-		Trigger:   trigger,
-		Status:    RunStatusRunning,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          uuid.NewString(),
+		SourceID:    sourceID,
+		Trigger:     trigger,
+		Status:      RunStatusRunning,
+		ScheduledAt: scheduledAt,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	s.runs = append(s.runs, run)
 	return run, nil
@@ -170,6 +174,47 @@ func (s *MemoryStore) MarkRunFailed(ctx context.Context, id, message string) err
 		return nil
 	}
 	return fmt.Errorf("run not found: %s", id)
+}
+
+func (s *MemoryStore) ListSourcesDue(ctx context.Context, now time.Time) ([]Source, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var due []Source
+	for _, source := range s.sources {
+		if source.Status != SourceStatusActive {
+			continue
+		}
+		if source.ScheduleEvery <= 0 {
+			continue
+		}
+		if source.NextRunAt.IsZero() || !source.NextRunAt.After(now) {
+			due = append(due, source)
+		}
+	}
+	return due, nil
+}
+
+func (s *MemoryStore) UpdateSourceNextRun(ctx context.Context, id string, next time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, source := range s.sources {
+		if source.ID != id {
+			continue
+		}
+		source.NextRunAt = next
+		s.sources[index] = source
+		return nil
+	}
+	return fmt.Errorf("source not found: %s", id)
+}
+
+func nextRunTime(now time.Time, every time.Duration) time.Time {
+	if every <= 0 {
+		return time.Time{}
+	}
+	return now.Add(every)
 }
 
 func (s *MemoryStore) Close() error {

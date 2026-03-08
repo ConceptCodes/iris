@@ -56,6 +56,7 @@ type CrawlSourceRequest struct {
 	MaxDepth       int      `json:"max_depth,omitempty"`
 	RateLimitRPS   int      `json:"rate_limit_rps,omitempty"`
 	AllowedDomains []string `json:"allowed_domains,omitempty"`
+	ScheduleEvery  string   `json:"schedule_every,omitempty"`
 }
 
 type CrawlSourceResponse struct {

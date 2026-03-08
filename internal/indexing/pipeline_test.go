@@ -2,6 +2,8 @@ package indexing
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,7 @@ type mockEngine struct {
 	lastReq    models.IndexRequest
 	lastRecord models.ImageRecord
 	lastBytes  []byte
+	force      bool
 }
 
 func (m *mockEngine) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
@@ -26,6 +29,14 @@ func (m *mockEngine) IndexFromURL(ctx context.Context, req models.IndexRequest) 
 func (m *mockEngine) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
 	m.lastBytes = append([]byte(nil), imageBytes...)
 	m.lastRecord = record
+	m.force = false
+	return m.id, nil
+}
+
+func (m *mockEngine) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	m.lastBytes = append([]byte(nil), imageBytes...)
+	m.lastRecord = record
+	m.force = true
 	return m.id, nil
 }
 
@@ -33,8 +44,14 @@ func TestPipelineIndexFromURL(t *testing.T) {
 	engine := &mockEngine{id: "url-id"}
 	pipeline := NewPipeline(engine, nil)
 
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("image-bytes"))
+	}))
+	defer server.Close()
+
 	id, err := pipeline.IndexFromURL(context.Background(), models.IndexRequest{
-		URL:      "https://example.com/cat.jpg",
+		URL:      server.URL + "/cat.jpg",
 		Filename: "cat.jpg",
 	})
 	if err != nil {
@@ -43,8 +60,11 @@ func TestPipelineIndexFromURL(t *testing.T) {
 	if id != "url-id" {
 		t.Fatalf("unexpected id: %s", id)
 	}
-	if engine.lastReq.URL != "https://example.com/cat.jpg" {
-		t.Fatalf("request not forwarded")
+	if engine.lastRecord.Meta["source_url"] == "" {
+		t.Fatalf("expected source_url metadata")
+	}
+	if engine.lastRecord.Meta["content_sha256"] == "" {
+		t.Fatalf("expected content_sha256 metadata")
 	}
 }
 
@@ -101,5 +121,28 @@ func TestPipelineIndexLocalFile(t *testing.T) {
 	}
 	if engine.lastRecord.Meta["source_path"] != path {
 		t.Fatalf("expected source_path metadata")
+	}
+}
+
+func TestPipelineReindexFromURL(t *testing.T) {
+	engine := &mockEngine{id: "reindex-id"}
+	pipeline := NewPipeline(engine, nil)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("reindex-bytes"))
+	}))
+	defer server.Close()
+
+	record := models.ImageRecord{ID: "existing-id"}
+	id, err := pipeline.ReindexFromURL(context.Background(), server.URL+"/img.png", record)
+	if err != nil {
+		t.Fatalf("reindex from url: %v", err)
+	}
+	if id != "reindex-id" {
+		t.Fatalf("unexpected id: %s", id)
+	}
+	if !engine.force {
+		t.Fatalf("expected reindex to force embedding")
 	}
 }

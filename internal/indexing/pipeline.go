@@ -2,9 +2,15 @@ package indexing
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"iris/internal/assets"
@@ -14,17 +20,42 @@ import (
 type Engine interface {
 	IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error)
 	IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error)
+	ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error)
 }
 
 type Pipeline struct {
 	engine     Engine
-	assetStore *assets.Store
+	assetStore assets.Store
+	options    PipelineOptions
 }
 
-func NewPipeline(engine Engine, assetStore *assets.Store) *Pipeline {
+type PipelineOptions struct {
+	MaxFetchBytes int
+	FetchClient   *http.Client
+}
+
+func NewPipeline(engine Engine, assetStore assets.Store) *Pipeline {
 	return &Pipeline{
 		engine:     engine,
 		assetStore: assetStore,
+		options: PipelineOptions{
+			MaxFetchBytes: maxFetchBytes,
+			FetchClient:   fetchHTTPClient,
+		},
+	}
+}
+
+func NewPipelineWithOptions(engine Engine, assetStore assets.Store, options PipelineOptions) *Pipeline {
+	if options.MaxFetchBytes <= 0 {
+		options.MaxFetchBytes = maxFetchBytes
+	}
+	if options.FetchClient == nil {
+		options.FetchClient = fetchHTTPClient
+	}
+	return &Pipeline{
+		engine:     engine,
+		assetStore: assetStore,
+		options:    options,
 	}
 }
 
@@ -32,7 +63,21 @@ func (p *Pipeline) IndexFromURL(ctx context.Context, req models.IndexRequest) (s
 	if req.URL == "" {
 		return "", fmt.Errorf("url is required")
 	}
-	return p.engine.IndexFromURL(ctx, req)
+	imageBytes, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes)
+	if err != nil {
+		return "", err
+	}
+	record := models.ImageRecord{
+		ID:       uuid.New().String(),
+		Filename: req.Filename,
+		Tags:     req.Tags,
+		Meta:     cloneMeta(req.Meta),
+	}
+	if record.Meta == nil {
+		record.Meta = map[string]string{}
+	}
+	record.Meta["origin_url"] = req.URL
+	return p.indexBytes(ctx, imageBytes, record, false)
 }
 
 func (p *Pipeline) IndexUploadedBytes(ctx context.Context, imageBytes []byte, filename string, tags []string, meta map[string]string) (string, error) {
@@ -42,7 +87,7 @@ func (p *Pipeline) IndexUploadedBytes(ctx context.Context, imageBytes []byte, fi
 		Tags:     tags,
 		Meta:     cloneMeta(meta),
 	}
-	return p.indexBytes(ctx, imageBytes, record)
+	return p.indexBytes(ctx, imageBytes, record, false)
 }
 
 func (p *Pipeline) IndexLocalFile(ctx context.Context, path string) (string, error) {
@@ -59,10 +104,38 @@ func (p *Pipeline) IndexLocalFile(ctx context.Context, path string) (string, err
 			"source_path": path,
 		},
 	}
-	return p.indexBytes(ctx, imageBytes, record)
+	return p.indexBytes(ctx, imageBytes, record, false)
 }
 
-func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+func (p *Pipeline) ReindexFromURL(ctx context.Context, imageURL string, record models.ImageRecord) (string, error) {
+	if imageURL == "" {
+		return "", fmt.Errorf("url is required")
+	}
+	imageBytes, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes)
+	if err != nil {
+		return "", err
+	}
+	if record.Meta == nil {
+		record.Meta = map[string]string{}
+	}
+	record.Meta["origin_url"] = imageURL
+	return p.indexBytes(ctx, imageBytes, record, true)
+}
+
+func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord, force bool) (string, error) {
+	if record.Meta == nil {
+		record.Meta = map[string]string{}
+	}
+	if _, ok := record.Meta["content_sha256"]; !ok {
+		record.Meta["content_sha256"] = hashBytes(imageBytes)
+	}
+	if record.Meta["source_url"] == "" {
+		if original, ok := record.Meta["origin_url"]; ok && original != "" {
+			record.Meta["source_url"] = original
+		} else if record.URL != "" {
+			record.Meta["source_url"] = record.URL
+		}
+	}
 	if p.assetStore != nil {
 		assetURL, err := p.assetStore.Save(record.ID, record.Filename, imageBytes)
 		if err != nil {
@@ -70,7 +143,61 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 		}
 		record.URL = assetURL
 	}
+	if record.Meta["source_url"] == "" && record.URL != "" {
+		record.Meta["source_url"] = record.URL
+	}
+	if force {
+		return p.engine.ReindexFromBytes(ctx, imageBytes, record)
+	}
 	return p.engine.IndexFromBytes(ctx, imageBytes, record)
+}
+
+const maxFetchBytes = 20 << 20
+
+var fetchHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int) ([]byte, error) {
+	if client == nil {
+		client = fetchHTTPClient
+	}
+	if maxBytes <= 0 {
+		maxBytes = maxFetchBytes
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch image url: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch image url: status %d", resp.StatusCode)
+	}
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if contentType != "" && !strings.HasPrefix(contentType, "image/") {
+		return nil, fmt.Errorf("unsupported content type: %s", contentType)
+	}
+	limited := io.LimitReader(resp.Body, int64(maxBytes+1))
+	buf, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("read image bytes: %w", err)
+	}
+	if len(buf) > maxBytes {
+		return nil, fmt.Errorf("image exceeds %d bytes limit", maxBytes)
+	}
+	if contentType == "" {
+		if detected := http.DetectContentType(buf); !strings.HasPrefix(detected, "image/") {
+			return nil, fmt.Errorf("unsupported content type: %s", detected)
+		}
+	}
+	return buf, nil
+}
+
+func hashBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func cloneMeta(meta map[string]string) map[string]string {

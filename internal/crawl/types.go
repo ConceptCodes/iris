@@ -36,6 +36,8 @@ type Source struct {
 	MaxDepth       int
 	RateLimitRPS   int
 	AllowedDomains []string
+	ScheduleEvery  time.Duration
+	NextRunAt      time.Time
 	CreatedAt      time.Time
 }
 
@@ -48,6 +50,7 @@ type Run struct {
 	IndexedCount    int
 	FailedCount     int
 	LastError       string
+	ScheduledAt     time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -59,6 +62,7 @@ type CreateSourceInput struct {
 	MaxDepth       int        `json:"max_depth,omitempty"`
 	RateLimitRPS   int        `json:"rate_limit_rps,omitempty"`
 	AllowedDomains []string   `json:"allowed_domains,omitempty"`
+	ScheduleEvery  string     `json:"schedule_every,omitempty"`
 }
 
 type TriggerRunInput struct {

@@ -62,6 +62,11 @@ type IndexLocalFilePayload struct {
 	RunID string `json:"run_id,omitempty"`
 }
 
+type ReindexImagePayload struct {
+	ID  string `json:"id"`
+	URL string `json:"url,omitempty"`
+}
+
 type DiscoverSourcePayload struct {
 	SourceID string `json:"source_id"`
 	RunID    string `json:"run_id"`

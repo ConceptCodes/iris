@@ -46,3 +46,39 @@ func TestServiceCreateAndTriggerRun(t *testing.T) {
 		t.Fatalf("mark completed: %v", err)
 	}
 }
+
+func TestMemoryStoreScheduling(t *testing.T) {
+	store := NewMemoryStore()
+	src, err := store.CreateSource(context.Background(), CreateSourceInput{
+		Kind:          SourceKindDomain,
+		SeedURL:       "https://example.com",
+		ScheduleEvery: "1m",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if src.ScheduleEvery != time.Minute {
+		t.Fatalf("expected schedule every 1m, got %s", src.ScheduleEvery)
+	}
+
+	now := time.Now().UTC().Add(2 * time.Minute)
+	sources, err := store.ListSourcesDue(context.Background(), now)
+	if err != nil {
+		t.Fatalf("list due: %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("expected due source")
+	}
+
+	next := now.Add(time.Minute)
+	if err := store.UpdateSourceNextRun(context.Background(), src.ID, next); err != nil {
+		t.Fatalf("update next run: %v", err)
+	}
+	sources, err = store.ListSourcesDue(context.Background(), now)
+	if err != nil {
+		t.Fatalf("list due: %v", err)
+	}
+	if len(sources) != 0 {
+		t.Fatalf("expected no due sources after update")
+	}
+}
