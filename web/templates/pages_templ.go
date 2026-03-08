@@ -43,7 +43,7 @@ func LandingPage() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"min-h-screen flex flex-col items-center justify-center px-4\"><div class=\"mb-8\"><h1 class=\"text-[92px] font-normal\"><span class=\"text-[#4285f4]\">G</span><span class=\"text-[#ea4335]\">o</span><span class=\"text-[#fbbc05]\">o</span><span class=\"text-[#4285f4]\">g</span><span class=\"text-[#34a853]\">l</span><span class=\"text-[#ea4335]\">e</span> <span class=\"ml-3 text-[#4285f4]\">Images</span></h1></div><div class=\"w-full max-w-[584px]\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"min-h-screen flex flex-col items-center justify-center px-4\"><div class=\"mb-8\"><h1 class=\"text-[92px] font-normal\"><span class=\"text-[#4285f4]\">I</span><span class=\"text-[#ea4335]\">r</span><span class=\"text-[#fbbc05]\">i</span><span class=\"text-[#4285f4]\">s</span> <span class=\"ml-3 text-[#4285f4]\">Search</span></h1></div><div class=\"w-full max-w-[584px]\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -57,7 +57,7 @@ func LandingPage() templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Image Search", "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Iris Search", "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -98,7 +98,7 @@ func SearchResultsPage(results []models.SearchResult, query string, filterType s
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"sticky top-0 z-30 bg-white border-b border-gray-200\"><div class=\"flex items-center h-14 px-4 lg:px-6\"><a href=\"/\" class=\"flex items-center mr-8\"><span class=\"text-xl font-normal\"><span class=\"text-[#4285f4]\">G</span><span class=\"text-[#ea4335]\">o</span><span class=\"text-[#fbbc05]\">o</span><span class=\"text-[#4285f4]\">g</span><span class=\"text-[#34a853]\">l</span><span class=\"text-[#ea4335]\">e</span> <span class=\"ml-2 text-[#4285f4]\">Images</span></span></a><div class=\"flex-1 max-w-[640px]\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"sticky top-0 z-30 bg-white border-b border-gray-200\"><div class=\"flex items-center h-14 px-4 lg:px-6\"><a href=\"/\" class=\"flex items-center mr-8\"><span class=\"text-xl font-normal\"><span class=\"text-[#4285f4]\">Iris</span> <span class=\"ml-2 text-[#4285f4]\">Search</span></span></a><div class=\"flex-1 max-w-[640px]\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -128,7 +128,7 @@ func SearchResultsPage(results []models.SearchResult, query string, filterType s
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout(query+" - Image Search", query).Render(templ.WithChildren(ctx, templ_7745c5c3_Var4), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout(query+" - Iris Search", query).Render(templ.WithChildren(ctx, templ_7745c5c3_Var4), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -169,7 +169,7 @@ func ErrorPage(query string, filterType string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"sticky top-0 z-30 bg-white border-b border-gray-200\"><div class=\"flex items-center h-14 px-4 lg:px-6\"><a href=\"/\" class=\"flex items-center mr-8\"><span class=\"text-xl font-normal\"><span class=\"text-[#4285f4]\">G</span><span class=\"text-[#ea4335]\">o</span><span class=\"text-[#fbbc05]\">o</span><span class=\"text-[#4285f4]\">g</span><span class=\"text-[#34a853]\">l</span><span class=\"text-[#ea4335]\">e</span> <span class=\"ml-2 text-[#4285f4]\">Images</span></span></a><div class=\"flex-1 max-w-[640px]\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"sticky top-0 z-30 bg-white border-b border-gray-200\"><div class=\"flex items-center h-14 px-4 lg:px-6\"><a href=\"/\" class=\"flex items-center mr-8\"><span class=\"text-xl font-normal\"><span class=\"text-[#4285f4]\">Iris</span> <span class=\"ml-2 text-[#4285f4]\">Search</span></span></a><div class=\"flex-1 max-w-[640px]\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -199,7 +199,7 @@ func ErrorPage(query string, filterType string) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Image Search - Error", query).Render(templ.WithChildren(ctx, templ_7745c5c3_Var6), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Iris Search - Error", query).Render(templ.WithChildren(ctx, templ_7745c5c3_Var6), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -240,7 +240,7 @@ func NoResultsPage(query string, filterType string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"sticky top-0 z-30 bg-white border-b border-gray-200\"><div class=\"flex items-center h-14 px-4 lg:px-6\"><a href=\"/\" class=\"flex items-center mr-8\"><span class=\"text-xl font-normal\"><span class=\"text-[#4285f4]\">G</span><span class=\"text-[#ea4335]\">o</span><span class=\"text-[#fbbc05]\">o</span><span class=\"text-[#4285f4]\">g</span><span class=\"text-[#34a853]\">l</span><span class=\"text-[#ea4335]\">e</span> <span class=\"ml-2 text-[#4285f4]\">Images</span></span></a><div class=\"flex-1 max-w-[640px]\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"sticky top-0 z-30 bg-white border-b border-gray-200\"><div class=\"flex items-center h-14 px-4 lg:px-6\"><a href=\"/\" class=\"flex items-center mr-8\"><span class=\"text-xl font-normal\"><span class=\"text-[#4285f4]\">Iris</span> <span class=\"ml-2 text-[#4285f4]\">Search</span></span></a><div class=\"flex-1 max-w-[640px]\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -270,7 +270,7 @@ func NoResultsPage(query string, filterType string) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout(query+" - Image Search", query).Render(templ.WithChildren(ctx, templ_7745c5c3_Var8), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout(query+" - Iris Search", query).Render(templ.WithChildren(ctx, templ_7745c5c3_Var8), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
