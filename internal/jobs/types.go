@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"iris/internal/constants"
 )
 
 type Type string
 
 const (
-	TypeDiscoverSource Type = "discover_source"
-	TypeDiscoverPage   Type = "discover_page"
-	TypeFetchImage     Type = "fetch_image"
-	TypeIndexLocalFile Type = "index_local_file"
-	TypeReindexImage   Type = "reindex_image"
+	TypeDiscoverSource Type = Type(constants.JobTypeDiscoverSource)
+	TypeFetchImage     Type = Type(constants.JobTypeFetchImage)
+	TypeIndexLocalFile Type = Type(constants.JobTypeIndexLocalFile)
+	TypeReindexImage   Type = Type(constants.JobTypeReindexImage)
 )
 
 type Status string

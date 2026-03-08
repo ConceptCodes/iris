@@ -11,11 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"iris/internal/assets"
+	"iris/internal/constants"
+	"iris/pkg/models"
 
 	"github.com/google/uuid"
-	"iris/internal/assets"
-	"iris/pkg/models"
 )
 
 type Engine interface {
@@ -40,18 +41,18 @@ func NewPipeline(engine Engine, assetStore assets.Store) *Pipeline {
 		engine:     engine,
 		assetStore: assetStore,
 		options: PipelineOptions{
-			MaxFetchBytes: maxFetchBytes,
-			FetchClient:   fetchHTTPClient,
+			MaxFetchBytes: constants.MaxImageSize,
+			FetchClient:   &http.Client{Timeout: constants.HTTPTimeout30s},
 		},
 	}
 }
 
 func NewPipelineWithOptions(engine Engine, assetStore assets.Store, options PipelineOptions) *Pipeline {
 	if options.MaxFetchBytes <= 0 {
-		options.MaxFetchBytes = maxFetchBytes
+		options.MaxFetchBytes = constants.MaxImageSize
 	}
 	if options.FetchClient == nil {
-		options.FetchClient = fetchHTTPClient
+		options.FetchClient = &http.Client{Timeout: constants.HTTPTimeout30s}
 	}
 	return &Pipeline{
 		engine:     engine,
@@ -77,9 +78,9 @@ func (p *Pipeline) IndexFromURL(ctx context.Context, req models.IndexRequest) (s
 	if record.Meta == nil {
 		record.Meta = map[string]string{}
 	}
-	record.Meta["origin_url"] = req.URL
+	record.Meta[constants.MetaKeyOriginURL] = req.URL
 	if mimeType != "" {
-		record.Meta["mime_type"] = mimeType
+		record.Meta[constants.MetaKeyMIMEType] = mimeType
 	}
 	return p.indexBytes(ctx, imageBytes, record, false)
 }
@@ -104,8 +105,8 @@ func (p *Pipeline) IndexLocalFile(ctx context.Context, path string) (string, err
 		ID:       uuid.New().String(),
 		Filename: filepath.Base(path),
 		Meta: map[string]string{
-			"source":      "local",
-			"source_path": path,
+			constants.MetaKeySource:     constants.KeywordLocal,
+			constants.MetaKeySourcePath: path,
 		},
 	}
 	return p.indexBytes(ctx, imageBytes, record, false)
@@ -122,9 +123,9 @@ func (p *Pipeline) ReindexFromURL(ctx context.Context, imageURL string, record m
 	if record.Meta == nil {
 		record.Meta = map[string]string{}
 	}
-	record.Meta["origin_url"] = imageURL
+	record.Meta[constants.MetaKeyOriginURL] = imageURL
 	if mimeType != "" {
-		record.Meta["mime_type"] = mimeType
+		record.Meta[constants.MetaKeyMIMEType] = mimeType
 	}
 	return p.indexBytes(ctx, imageBytes, record, true)
 }
@@ -133,20 +134,20 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 	if record.Meta == nil {
 		record.Meta = map[string]string{}
 	}
-	if _, ok := record.Meta["content_sha256"]; !ok {
-		record.Meta["content_sha256"] = hashBytes(imageBytes)
+	if _, ok := record.Meta[constants.MetaKeyContentSHA256]; !ok {
+		record.Meta[constants.MetaKeyContentSHA256] = hashBytes(imageBytes)
 	}
-	if record.Meta["source_url"] == "" {
-		if original, ok := record.Meta["origin_url"]; ok && original != "" {
-			record.Meta["source_url"] = original
+	if record.Meta[constants.MetaKeySourceURL] == "" {
+		if original, ok := record.Meta[constants.MetaKeyOriginURL]; ok && original != "" {
+			record.Meta[constants.MetaKeySourceURL] = original
 		} else if record.URL != "" {
-			record.Meta["source_url"] = record.URL
+			record.Meta[constants.MetaKeySourceURL] = record.URL
 		}
 	}
 	// Extract source_domain from source_url if not already set
-	if record.Meta["source_domain"] == "" && record.Meta["source_url"] != "" {
-		if u, err := url.Parse(record.Meta["source_url"]); err == nil {
-			record.Meta["source_domain"] = u.Hostname()
+	if record.Meta[constants.MetaKeySourceDomain] == "" && record.Meta[constants.MetaKeySourceURL] != "" {
+		if u, err := url.Parse(record.Meta[constants.MetaKeySourceURL]); err == nil {
+			record.Meta[constants.MetaKeySourceDomain] = u.Hostname()
 		}
 	}
 	if p.assetStore != nil {
@@ -156,8 +157,8 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 		}
 		record.URL = assetURL
 	}
-	if record.Meta["source_url"] == "" && record.URL != "" {
-		record.Meta["source_url"] = record.URL
+	if record.Meta[constants.MetaKeySourceURL] == "" && record.URL != "" {
+		record.Meta[constants.MetaKeySourceURL] = record.URL
 	}
 	if force {
 		return p.engine.ReindexFromBytes(ctx, imageBytes, record)
@@ -165,16 +166,12 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 	return p.engine.IndexFromBytes(ctx, imageBytes, record)
 }
 
-const maxFetchBytes = 20 << 20
-
-var fetchHTTPClient = &http.Client{Timeout: 30 * time.Second}
-
 func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int) ([]byte, string, error) {
 	if client == nil {
-		client = fetchHTTPClient
+		client = &http.Client{Timeout: constants.HTTPTimeout30s}
 	}
 	if maxBytes <= 0 {
-		maxBytes = maxFetchBytes
+		maxBytes = constants.MaxImageSize
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -188,8 +185,8 @@ func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, ma
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("fetch image url: status %d", resp.StatusCode)
 	}
-	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
-	if contentType != "" && !strings.HasPrefix(contentType, "image/") {
+	contentType := strings.ToLower(resp.Header.Get(constants.HeaderContentType))
+	if contentType != "" && !strings.HasPrefix(contentType, constants.MIMETypeImagePrefix) {
 		return nil, "", fmt.Errorf("unsupported content type: %s", contentType)
 	}
 	limited := io.LimitReader(resp.Body, int64(maxBytes+1))
@@ -202,7 +199,7 @@ func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, ma
 	}
 	if contentType == "" {
 		detected := http.DetectContentType(buf)
-		if !strings.HasPrefix(detected, "image/") {
+		if !strings.HasPrefix(detected, constants.MIMETypeImagePrefix) {
 			return nil, "", fmt.Errorf("unsupported content type: %s", detected)
 		}
 		contentType = detected
