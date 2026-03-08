@@ -109,6 +109,10 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, id string, err error, retr
 	return fmt.Errorf("job not found: %s", id)
 }
 
+func (s *MemoryStore) Close() error {
+	return nil
+}
+
 func isAllowedType(jobType Type, allowedTypes []Type) bool {
 	return len(allowedTypes) == 0 || slices.Contains(allowedTypes, jobType)
 }

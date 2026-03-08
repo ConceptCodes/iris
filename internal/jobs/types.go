@@ -45,6 +45,7 @@ type Store interface {
 	LeaseNext(ctx context.Context, now time.Time, leaseDuration time.Duration, allowedTypes ...Type) (Job, bool, error)
 	MarkSucceeded(ctx context.Context, id string) error
 	MarkFailed(ctx context.Context, id string, err error, retryAt time.Time) error
+	Close() error
 }
 
 type FetchImagePayload struct {
