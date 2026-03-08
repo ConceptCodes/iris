@@ -56,11 +56,16 @@ What is implemented now:
 - crawl run counters for discovered, indexed, and failed items
 - robots.txt checks before crawling or enqueuing discovered URLs
 - rel=canonical parsing to collapse duplicate page discovery
+- cached HTTP fetches with `ETag` / `Last-Modified` revalidation
+- URL normalization that strips common tracking parameters before dedupe
+- host-level crawl concurrency caps and bounded retry budgets
+- Postgres-backed crawl cache persistence when the worker uses `JOB_BACKEND=postgres`
+- periodic pruning of expired crawl cache rows
 - Docker Compose services for Postgres and worker
 
 What is scaffolded but not finished:
 
-- advanced crawl controls like robots.txt and canonical handling
+- advanced crawl controls like crawl-budget tuning and persistent cache state
 - auth beyond a single shared admin API key
 
 ## Quick Start
@@ -272,11 +277,17 @@ What it does today:
 - applies per-source crawl throttling when `rate_limit_rps` is set
 - respects `robots.txt` for crawled pages and discovered image URLs
 - uses `rel=canonical` as a duplicate-page consolidation signal
+- reuses cached page and sitemap responses with conditional GETs when servers support them
+- normalizes discovered URLs before queue dedupe and indexing
+- caps concurrent fetches per host and retries transient failures with backoff
+- persists crawl cache state across worker restarts when Postgres is enabled
+- prunes expired cache rows in bounded batches on a background interval
 - updates crawl runs as discovery and indexing progress
 
 What it does not do yet:
 
-- follow advanced crawl policies like crawl-budget tuning and robots cache expiry
+- follow advanced crawl policies like crawl-budget tuning and adaptive recrawl scheduling
+- separate crawl cache retention policies beyond expiry-based cleanup
 - expose job dedupe and crawl metrics through richer admin dashboards
 
 ## Configuration
@@ -295,6 +306,13 @@ What it does not do yet:
 | `ADMIN_API_KEY` | empty | Enables and protects `/admin/*` endpoints when set |
 | `JOB_POLL_INTERVAL` | `1s` | Worker idle poll interval |
 | `LEASE_DURATION` | `30s` | Worker lease duration |
+| `FETCH_RETRIES` | `2` | Retry budget for transient crawl fetch failures |
+| `FETCH_RETRY_BACKOFF` | `500ms` | Base backoff for retryable fetch failures |
+| `HOST_CONCURRENCY` | `2` | Max concurrent crawl fetches per host |
+| `HTTP_CACHE_TTL` | `10m` | Default TTL for cached page and sitemap responses |
+| `ROBOTS_CACHE_TTL` | `24h` | Default TTL for cached robots.txt responses |
+| `CACHE_PRUNE_INTERVAL` | `15m` | How often crawler mode prunes expired cache rows |
+| `CACHE_PRUNE_BATCH` | `500` | Max expired cache rows deleted per prune pass |
 
 ## Scaling Notes
 
