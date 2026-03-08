@@ -244,7 +244,8 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 		}
 
 		jobStart := time.Now()
-		if err := handleIndexerJob(ctx, pipeline, job); err != nil {
+		result, err := handleIndexerJob(ctx, pipeline, job)
+		if err != nil {
 			slog.Error("job failed", "job_id", job.ID, "type", job.Type, "error", err)
 
 			// Classify error and calculate appropriate retry backoff
@@ -272,7 +273,12 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 		}
 		metrics.IncWorkerJobSucceeded()
 		metrics.ObserveWorkerJobLatency(time.Since(jobStart))
-		_ = incrementRunIndexedForJob(ctx, crawlStore, job)
+		switch result.Status {
+		case indexing.ResultStatusDuplicate:
+			_ = incrementRunDuplicateForJob(ctx, crawlStore, job)
+		default:
+			_ = incrementRunIndexedForJob(ctx, crawlStore, job)
+		}
 	}
 }
 
@@ -365,18 +371,19 @@ func processSchedules(ctx context.Context, service *crawl.Service) {
 			slog.Warn("failed to set next run", "source_id", source.ID, "error", err)
 			continue
 		}
+		metrics.ObserveSchedulerDecision(schedulerDecisionForSource(source), next.Sub(now))
 		if _, err := service.TriggerRunForSource(ctx, source, "scheduled", now); err != nil {
 			slog.Warn("failed to trigger scheduled run", "source_id", source.ID, "error", err)
 		}
 	}
 }
 
-func handleIndexerJob(ctx context.Context, pipeline *indexing.Pipeline, job jobs.Job) error {
+func handleIndexerJob(ctx context.Context, pipeline *indexing.Pipeline, job jobs.Job) (indexing.Result, error) {
 	switch job.Type {
 	case jobs.TypeFetchImage:
 		var payload jobs.FetchImagePayload
 		if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
-			return err
+			return indexing.Result{}, err
 		}
 		meta := make(map[string]string)
 		for k, v := range payload.Meta {
@@ -397,30 +404,27 @@ func handleIndexerJob(ctx context.Context, pipeline *indexing.Pipeline, job jobs
 		if payload.MimeType != "" {
 			meta["mime_type"] = payload.MimeType
 		}
-		_, err := pipeline.IndexFromURL(ctx, models.IndexRequest{
+		return pipeline.IndexFromURLResult(ctx, models.IndexRequest{
 			URL:      payload.URL,
 			Filename: payload.Filename,
 			Tags:     payload.Tags,
 			Meta:     meta,
 		})
-		return err
 	case jobs.TypeIndexLocalFile:
 		var payload jobs.IndexLocalFilePayload
 		if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
-			return err
+			return indexing.Result{}, err
 		}
-		_, err := pipeline.IndexLocalFile(ctx, payload.Path)
-		return err
+		return pipeline.IndexLocalFileResult(ctx, payload.Path)
 	case jobs.TypeReindexImage:
 		var payload jobs.ReindexImagePayload
 		if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
-			return err
+			return indexing.Result{}, err
 		}
 		record := models.ImageRecord{ID: payload.ID}
-		_, err := pipeline.ReindexFromURL(ctx, payload.URL, record)
-		return err
+		return pipeline.ReindexFromURLResult(ctx, payload.URL, record)
 	default:
-		return nil
+		return indexing.Result{}, nil
 	}
 }
 
@@ -437,7 +441,7 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, runtime *crawlerRu
 
 	switch source.Kind {
 	case crawl.SourceKindLocalDir:
-		discovered, err := enqueueLocalDirJobs(ctx, jobStore, source.LocalPath, payload.RunID)
+		discovered, err := enqueueLocalDirJobs(ctx, jobStore, source.LocalPath, payload.RunID, source.MaxImagesPerRun)
 		if err != nil {
 			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 			return err
@@ -447,7 +451,7 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, runtime *crawlerRu
 		}
 		return crawlStore.MarkRunCompleted(ctx, payload.RunID)
 	case crawl.SourceKindURLList:
-		discovered, err := enqueueURLListSource(ctx, jobStore, source.SeedURL, payload.RunID)
+		discovered, err := enqueueURLListSource(ctx, jobStore, source.SeedURL, payload.RunID, source.MaxImagesPerRun)
 		if err != nil {
 			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 			return err
@@ -566,11 +570,15 @@ func newCrawlStore(cfg config.Worker) (crawl.Store, error) {
 	}
 }
 
-func enqueueLocalDirJobs(ctx context.Context, jobStore jobs.Store, dir, runID string) (int, error) {
+func enqueueLocalDirJobs(ctx context.Context, jobStore jobs.Store, dir, runID string, maxImages int) (int, error) {
 	count := 0
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
+		}
+		if maxImages > 0 && count >= maxImages {
+			metrics.IncCrawlBudgetHit("images")
+			return filepath.SkipAll
 		}
 		if !imageExts[strings.ToLower(filepath.Ext(path))] {
 			return nil
@@ -593,7 +601,7 @@ func enqueueLocalDirJobs(ctx context.Context, jobStore jobs.Store, dir, runID st
 	return count, err
 }
 
-func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, runID string) (int, error) {
+func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, runID string, maxImages int) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, seedURL, nil)
 	if err != nil {
 		return 0, err
@@ -612,6 +620,10 @@ func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, run
 	}
 	count := 0
 	for _, line := range strings.Split(string(body), "\n") {
+		if maxImages > 0 && count >= maxImages {
+			metrics.IncCrawlBudgetHit("images")
+			break
+		}
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -667,6 +679,14 @@ func discoverDomainSource(ctx context.Context, cfg config.Worker, runtime *crawl
 	discovered := 0
 
 	for len(queue) > 0 {
+		if source.MaxPagesPerRun > 0 && len(processedPages) >= source.MaxPagesPerRun {
+			metrics.IncCrawlBudgetHit("pages")
+			break
+		}
+		if source.MaxImagesPerRun > 0 && discovered >= source.MaxImagesPerRun {
+			metrics.IncCrawlBudgetHit("images")
+			break
+		}
 		item := queue[0]
 		queue = queue[1:]
 		if _, exists := visitedPages[item.url]; exists {
@@ -679,6 +699,7 @@ func discoverDomainSource(ctx context.Context, cfg config.Worker, runtime *crawl
 			return discovered, err
 		}
 		if !allowed {
+			metrics.IncCrawlSkip("robots")
 			continue
 		}
 
@@ -709,6 +730,10 @@ func discoverDomainSource(ctx context.Context, cfg config.Worker, runtime *crawl
 		processedPages[pageKey] = struct{}{}
 
 		for _, imageURL := range discovery.ImageURLs {
+			if source.MaxImagesPerRun > 0 && discovered >= source.MaxImagesPerRun {
+				metrics.IncCrawlBudgetHit("images")
+				break
+			}
 			if _, exists := seenImages[imageURL]; exists {
 				continue
 			}
@@ -717,6 +742,7 @@ func discoverDomainSource(ctx context.Context, cfg config.Worker, runtime *crawl
 				return discovered, err
 			}
 			if !allowed {
+				metrics.IncCrawlSkip("robots")
 				continue
 			}
 			seenImages[imageURL] = struct{}{}
@@ -761,6 +787,14 @@ func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *craw
 	processedPages := map[string]struct{}{}
 	seenImages := map[string]struct{}{}
 	for _, loc := range locs {
+		if source.MaxPagesPerRun > 0 && len(processedPages) >= source.MaxPagesPerRun {
+			metrics.IncCrawlBudgetHit("pages")
+			break
+		}
+		if source.MaxImagesPerRun > 0 && discovered >= source.MaxImagesPerRun {
+			metrics.IncCrawlBudgetHit("images")
+			break
+		}
 		normalizedLoc, err := crawl.NormalizeURL(loc)
 		if err != nil {
 			continue
@@ -770,10 +804,15 @@ func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *craw
 			return discovered, err
 		}
 		if !allowed {
+			metrics.IncCrawlSkip("robots")
 			continue
 		}
 
 		if crawl.LooksLikeImageURL(normalizedLoc) {
+			if source.MaxImagesPerRun > 0 && discovered >= source.MaxImagesPerRun {
+				metrics.IncCrawlBudgetHit("images")
+				break
+			}
 			if _, exists := seenImages[normalizedLoc]; exists {
 				continue
 			}
@@ -805,6 +844,10 @@ func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *craw
 		}
 		processedPages[pageKey] = struct{}{}
 		for _, imageURL := range discovery.ImageURLs {
+			if source.MaxImagesPerRun > 0 && discovered >= source.MaxImagesPerRun {
+				metrics.IncCrawlBudgetHit("images")
+				break
+			}
 			if _, exists := seenImages[imageURL]; exists {
 				continue
 			}
@@ -813,6 +856,7 @@ func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *craw
 				return discovered, err
 			}
 			if !allowed {
+				metrics.IncCrawlSkip("robots")
 				continue
 			}
 			seenImages[imageURL] = struct{}{}
@@ -862,6 +906,15 @@ func incrementRunIndexedForJob(ctx context.Context, crawlStore crawl.Store, job 
 	return crawlStore.IncrementRunIndexed(ctx, runID, 1)
 }
 
+func incrementRunDuplicateForJob(ctx context.Context, crawlStore crawl.Store, job jobs.Job) error {
+	runID, err := extractRunID(job)
+	if err != nil || runID == "" {
+		return nil
+	}
+	metrics.IncCrawlJobsDuplicate()
+	return crawlStore.IncrementRunDuplicate(ctx, runID, 1)
+}
+
 func incrementRunFailedForJob(ctx context.Context, crawlStore crawl.Store, job jobs.Job, failure error) error {
 	runID, err := extractRunID(job)
 	if err != nil || runID == "" {
@@ -898,6 +951,21 @@ func dedupKey(jobType, runID, target string) string {
 		return jobType + ":" + target
 	}
 	return jobType + ":" + runID + ":" + target
+}
+
+func schedulerDecisionForSource(source crawl.Source) string {
+	switch {
+	case source.ConsecutiveFailures > 0:
+		return "failure_backoff"
+	case source.LastIndexedCount > 0:
+		return "maintain"
+	case source.LastDiscoveredCount == 0 && !source.LastRunAt.IsZero():
+		return "low_yield_backoff"
+	case source.LastDuplicateCount > 0 && source.LastIndexedCount == 0:
+		return "duplicate_backoff"
+	default:
+		return "initial"
+	}
 }
 
 func sourceThrottle(rps int) func(context.Context) error {

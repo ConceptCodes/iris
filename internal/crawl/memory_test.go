@@ -39,11 +39,22 @@ func TestServiceCreateAndTriggerRun(t *testing.T) {
 	if err := store.IncrementRunIndexed(context.Background(), run.ID, 2); err != nil {
 		t.Fatalf("increment indexed: %v", err)
 	}
+	if err := store.IncrementRunDuplicate(context.Background(), run.ID, 1); err != nil {
+		t.Fatalf("increment duplicate: %v", err)
+	}
 	if err := store.IncrementRunFailed(context.Background(), run.ID, 1, "boom"); err != nil {
 		t.Fatalf("increment failed: %v", err)
 	}
 	if err := store.MarkRunCompleted(context.Background(), run.ID); err != nil {
 		t.Fatalf("mark completed: %v", err)
+	}
+
+	updatedSource, err := store.GetSource(context.Background(), source.ID)
+	if err != nil {
+		t.Fatalf("get updated source: %v", err)
+	}
+	if updatedSource.LastDuplicateCount != 1 {
+		t.Fatalf("expected duplicate count persisted, got %d", updatedSource.LastDuplicateCount)
 	}
 }
 

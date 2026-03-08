@@ -39,6 +39,12 @@ func (s *Service) CreateSource(ctx context.Context, input CreateSourceInput) (So
 			return Source{}, fmt.Errorf("invalid schedule_every: %w", err)
 		}
 	}
+	if input.MaxPagesPerRun < 0 {
+		return Source{}, fmt.Errorf("max_pages_per_run must be >= 0")
+	}
+	if input.MaxImagesPerRun < 0 {
+		return Source{}, fmt.Errorf("max_images_per_run must be >= 0")
+	}
 	return s.store.CreateSource(ctx, input)
 }
 
