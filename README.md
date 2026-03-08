@@ -48,12 +48,15 @@ What is implemented now:
 - local asset persistence for uploaded and local images
 - batch indexing CLI
 - worker with memory and Postgres job backends
+- crawl source and run persistence
+- admin APIs for creating sources and triggering runs
 - Docker Compose services for Postgres and worker
 
 What is scaffolded but not finished:
 
-- crawler discovery
-- admin endpoints for crawl/job management
+- HTML/domain/sitemap crawling
+- run progress aggregation beyond enqueue counts
+- auth around admin ingestion APIs
 
 ## Quick Start
 
@@ -147,6 +150,49 @@ curl -X POST http://localhost:8080/search/image/url \
   -d '{ "url": "https://example.com/query.jpg", "top_k": 10 }'
 ```
 
+## Admin Crawl APIs
+
+Implemented admin endpoints:
+
+### Create a crawl source
+
+`local_dir` source:
+
+```bash
+curl -X POST http://localhost:8080/admin/sources \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "kind": "local_dir",
+    "local_path": "./images"
+  }'
+```
+
+`url_list` source:
+
+```bash
+curl -X POST http://localhost:8080/admin/sources \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "kind": "url_list",
+    "seed_url": "https://example.com/list.txt"
+  }'
+```
+
+### Trigger a run
+
+```bash
+curl -X POST http://localhost:8080/admin/sources/<source-id>/run \
+  -H 'Content-Type: application/json' \
+  -d '{"trigger":"manual"}'
+```
+
+### Inspect runs
+
+```bash
+curl http://localhost:8080/admin/runs
+curl http://localhost:8080/admin/runs/<run-id>
+```
+
 ## CLI Indexing
 
 ```bash
@@ -182,12 +228,14 @@ What it does today:
 
 - leases jobs from memory or Postgres
 - handles `fetch_image` and `index_local_file`
+- handles `discover_source` for `local_dir` and `url_list` sources
 - reuses `internal/indexing`
+- updates crawl runs in the crawl store
 
 What it does not do yet:
 
 - crawl remote pages
-- expose admin job APIs
+- process `domain` or `sitemap` discovery sources
 
 ## Configuration
 
@@ -231,6 +279,10 @@ What it does not do yet:
 │   │   └── store.go          Local asset persistence
 │   ├── clip/
 │   │   └── client.go         CLIP sidecar HTTP client
+│   ├── crawl/
+│   │   ├── service.go        Source/run orchestration
+│   │   ├── memory.go         In-memory crawl store
+│   │   └── postgres.go       Postgres crawl store
 │   ├── indexing/
 │   │   └── pipeline.go       Shared ingestion pipeline
 │   ├── jobs/
