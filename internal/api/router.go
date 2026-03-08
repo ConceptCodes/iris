@@ -13,11 +13,30 @@ import (
 	"iris/internal/crawl"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
+	"iris/internal/metrics"
 	"iris/internal/search"
 	"iris/internal/web"
 )
 
+type AssetsSettings struct {
+	Backend    string
+	LocalDir   string
+	Bucket     string
+	Region     string
+	Endpoint   string
+	AccessKey  string
+	SecretKey  string
+	SessionKey string
+	Prefix     string
+	PublicBase string
+	PathStyle  bool
+}
+
 func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Service, adminAPIKey string) http.Handler {
+	return NewRouterWithAssets(engine, AssetsSettings{LocalDir: assetDir}, crawlService, adminAPIKey)
+}
+
+func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlService *crawl.Service, adminAPIKey string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -33,9 +52,10 @@ func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Servic
 		MaxAge:           300,
 	}))
 
-	assetStore := assets.NewStore(assetDir)
+	assetStore, assetDir := buildAssetStore(assetsCfg)
 	indexer := indexing.NewPipeline(engine, assetStore)
-	h := NewHandler(engine, indexer, crawlService)
+	metrics := metrics.NewCounters()
+	h := NewHandler(engine, indexer, crawlService, metrics)
 	wh := web.NewHandlers(engine)
 
 	if adminAPIKey != "" {
@@ -43,11 +63,13 @@ func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Servic
 		r.With(requireAdminKey(adminAPIKey)).Post("/admin/sources/{id}/run", h.TriggerSourceRun)
 		r.With(requireAdminKey(adminAPIKey)).Get("/admin/runs", h.ListRuns)
 		r.With(requireAdminKey(adminAPIKey)).Get("/admin/runs/{id}", h.GetRun)
+		r.With(requireAdminKey(adminAPIKey)).Get("/admin/metrics", h.Metrics)
 	} else {
 		r.Post("/admin/sources", adminDisabled)
 		r.Post("/admin/sources/{id}/run", adminDisabled)
 		r.Get("/admin/runs", adminDisabled)
 		r.Get("/admin/runs/{id}", adminDisabled)
+		r.Get("/admin/metrics", adminDisabled)
 	}
 
 	r.Get("/health", h.Health)
@@ -64,9 +86,36 @@ func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Servic
 	r.Post("/search/text", h.SearchText)
 	r.Post("/search/image", h.SearchImage)
 	r.Post("/search/image/url", h.SearchImageURL)
-	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetStore.Dir()))))
+	if assetDir != "" {
+		r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetDir))))
+	}
 
 	return r
+}
+
+func buildAssetStore(cfg AssetsSettings) (assets.Store, string) {
+	store, err := assets.NewStoreFromSettings(context.Background(), assets.Settings{
+		Backend:  cfg.Backend,
+		LocalDir: cfg.LocalDir,
+		S3: assets.S3Config{
+			Bucket:       cfg.Bucket,
+			Region:       cfg.Region,
+			Endpoint:     cfg.Endpoint,
+			AccessKey:    cfg.AccessKey,
+			SecretKey:    cfg.SecretKey,
+			SessionToken: cfg.SessionKey,
+			Prefix:       cfg.Prefix,
+			PublicBase:   cfg.PublicBase,
+			UsePathStyle: cfg.PathStyle,
+		},
+	})
+	if err != nil {
+		store = assets.NewStore(cfg.LocalDir)
+	}
+	if dir, ok := store.LocalDir(); ok {
+		return store, dir
+	}
+	return store, ""
 }
 
 func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, func(), error) {

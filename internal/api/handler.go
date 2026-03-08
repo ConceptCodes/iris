@@ -8,6 +8,7 @@ import (
 
 	"iris/internal/crawl"
 	"iris/internal/indexing"
+	"iris/internal/metrics"
 	"iris/internal/search"
 	"iris/pkg/models"
 )
@@ -18,10 +19,11 @@ type Handler struct {
 	engine       search.Engine
 	indexer      *indexing.Pipeline
 	crawlService *crawl.Service
+	metrics      *metrics.Counters
 }
 
-func NewHandler(engine search.Engine, indexer *indexing.Pipeline, crawlService *crawl.Service) *Handler {
-	return &Handler{engine: engine, indexer: indexer, crawlService: crawlService}
+func NewHandler(engine search.Engine, indexer *indexing.Pipeline, crawlService *crawl.Service, metrics *metrics.Counters) *Handler {
+	return &Handler{engine: engine, indexer: indexer, crawlService: crawlService, metrics: metrics}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -29,17 +31,29 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
+	if h.metrics != nil {
+		h.metrics.IncIndexRequest()
+	}
 	var req models.IndexRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if h.metrics != nil {
+			h.metrics.IncIndexError()
+		}
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 	if req.URL == "" {
+		if h.metrics != nil {
+			h.metrics.IncIndexError()
+		}
 		writeError(w, http.StatusBadRequest, "url is required")
 		return
 	}
 	id, err := h.indexer.IndexFromURL(r.Context(), req)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.IncIndexError()
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -47,18 +61,30 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
+	if h.metrics != nil {
+		h.metrics.IncIndexRequest()
+	}
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		if h.metrics != nil {
+			h.metrics.IncIndexError()
+		}
 		writeError(w, http.StatusBadRequest, "file too large or invalid form")
 		return
 	}
 	file, header, err := r.FormFile("image")
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.IncIndexError()
+		}
 		writeError(w, http.StatusBadRequest, "image file is required")
 		return
 	}
 	defer file.Close()
 	buf := make([]byte, header.Size)
 	if _, err := file.Read(buf); err != nil {
+		if h.metrics != nil {
+			h.metrics.IncIndexError()
+		}
 		writeError(w, http.StatusInternalServerError, "failed to read file")
 		return
 	}
@@ -78,6 +104,9 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.indexer.IndexUploadedBytes(r.Context(), buf, filename, tags, meta)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.IncIndexError()
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -85,18 +114,30 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
+	if h.metrics != nil {
+		h.metrics.IncSearchRequest()
+	}
 	var req models.TextSearchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 	if req.Query == "" {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusBadRequest, "query is required")
 		return
 	}
 	start := time.Now()
 	results, err := h.engine.SearchByText(r.Context(), req)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -108,18 +149,30 @@ func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
+	if h.metrics != nil {
+		h.metrics.IncSearchRequest()
+	}
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusBadRequest, "file too large or invalid form")
 		return
 	}
 	file, header, err := r.FormFile("image")
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusBadRequest, "image file is required")
 		return
 	}
 	defer file.Close()
 	buf := make([]byte, header.Size)
 	if _, err := file.Read(buf); err != nil {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusInternalServerError, "failed to read file")
 		return
 	}
@@ -128,6 +181,9 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	results, err := h.engine.SearchByImageBytes(r.Context(), buf, topK, filters)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -138,22 +194,34 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
+	if h.metrics != nil {
+		h.metrics.IncSearchRequest()
+	}
 	var req struct {
 		URL     string            `json:"url"`
 		TopK    int               `json:"top_k"`
 		Filters map[string]string `json:"filters"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 	if req.URL == "" {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusBadRequest, "url is required")
 		return
 	}
 	start := time.Now()
 	results, err := h.engine.SearchByImageURL(r.Context(), req.URL, req.TopK, req.Filters)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.IncSearchError()
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -181,6 +249,7 @@ func (h *Handler) CreateSource(w http.ResponseWriter, r *http.Request) {
 		MaxDepth:       req.MaxDepth,
 		RateLimitRPS:   req.RateLimitRPS,
 		AllowedDomains: req.AllowedDomains,
+		ScheduleEvery:  req.ScheduleEvery,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -200,6 +269,9 @@ func (h *Handler) TriggerSourceRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if h.metrics != nil {
+		h.metrics.IncCrawlRunsQueued()
 	}
 	writeJSON(w, http.StatusOK, models.TriggerRunResponse{RunID: run.ID, Status: string(run.Status)})
 }
@@ -228,6 +300,14 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
+	if h.metrics == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"metrics": metrics.Snapshot{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"metrics": h.metrics.Snapshot()})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

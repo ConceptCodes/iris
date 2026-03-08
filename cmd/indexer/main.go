@@ -58,7 +58,26 @@ func main() {
 	defer qdrantStore.Close()
 
 	engine := search.NewEngine(clipClient, qdrantStore)
-	pipeline := indexing.NewPipeline(engine, assets.NewStore(cfg.AssetDir))
+	assetStore, err := assets.NewStoreFromSettings(context.Background(), assets.Settings{
+		Backend:  cfg.AssetBackend,
+		LocalDir: cfg.AssetDir,
+		S3: assets.S3Config{
+			Bucket:       cfg.AssetBucket,
+			Region:       cfg.AssetRegion,
+			Endpoint:     cfg.AssetEndpoint,
+			AccessKey:    cfg.AssetAccessKey,
+			SecretKey:    cfg.AssetSecretKey,
+			SessionToken: cfg.AssetSessionKey,
+			Prefix:       cfg.AssetPrefix,
+			PublicBase:   cfg.AssetPublicBase,
+			UsePathStyle: cfg.AssetPathStyle,
+		},
+	})
+	if err != nil {
+		slog.Error("failed to initialize asset store", "error", err)
+		os.Exit(1)
+	}
+	pipeline := indexing.NewPipeline(engine, assetStore)
 
 	var jobs []string
 	switch *mode {

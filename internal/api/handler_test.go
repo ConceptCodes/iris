@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,11 @@ func (m *mockSearchEngine) IndexFromBytes(ctx context.Context, imageBytes []byte
 	return m.id, m.err
 }
 
+func (m *mockSearchEngine) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	m.lastRecord = record
+	return m.id, m.err
+}
+
 func (m *mockSearchEngine) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
 	m.lastQuery = req.Query
 	m.lastTopK = req.TopK
@@ -64,8 +70,12 @@ func (m *mockSearchEngine) GetSimilar(ctx context.Context, id string, topK int) 
 	return m.res, m.err
 }
 
+func (m *mockSearchEngine) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {
+	return "", false, m.err
+}
+
 func newTestHandler(engine *mockSearchEngine) *Handler {
-	return NewHandler(engine, indexing.NewPipeline(engine, nil), nil)
+	return NewHandler(engine, indexing.NewPipeline(engine, nil), nil, nil)
 }
 
 func TestHandler_Health(t *testing.T) {
@@ -107,8 +117,13 @@ func TestHandler_IndexFromURL(t *testing.T) {
 	})
 
 	t.Run("engine error propagation", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte("fake image"))
+		}))
+		defer server.Close()
 		h := newTestHandler(&mockSearchEngine{err: errors.New("engine fail")})
-		req := httptest.NewRequest("POST", "/index/url", strings.NewReader(`{"url":"http://example.com"}`))
+		req := httptest.NewRequest("POST", "/index/url", strings.NewReader(fmt.Sprintf(`{"url":"%s"}`, server.URL)))
 		w := httptest.NewRecorder()
 		h.IndexFromURL(w, req)
 		if w.Code != http.StatusInternalServerError {
@@ -124,7 +139,12 @@ func TestHandler_IndexFromURL(t *testing.T) {
 	t.Run("success payload shape", func(t *testing.T) {
 		mock := &mockSearchEngine{id: "123"}
 		h := newTestHandler(mock)
-		req := httptest.NewRequest("POST", "/index/url", strings.NewReader(`{"url":"http://example.com"}`))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte("fake image"))
+		}))
+		defer server.Close()
+		req := httptest.NewRequest("POST", "/index/url", strings.NewReader(fmt.Sprintf(`{"url":"%s"}`, server.URL)))
 		w := httptest.NewRecorder()
 		h.IndexFromURL(w, req)
 		if w.Code != http.StatusOK {
@@ -285,7 +305,7 @@ func TestHandler_SearchImage(t *testing.T) {
 	}
 
 	t.Run("multipart parse and engine error", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{err: errors.New("engine error")}, nil, nil)
+		h := NewHandler(&mockSearchEngine{err: errors.New("engine error")}, nil, nil, nil)
 		req, _ := createMultipartRequest("", "")
 		w := httptest.NewRecorder()
 		h.SearchImage(w, req)
@@ -296,7 +316,7 @@ func TestHandler_SearchImage(t *testing.T) {
 
 	t.Run("success parsing valid strings", func(t *testing.T) {
 		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil)
+		h := NewHandler(mock, nil, nil, nil)
 		req, _ := createMultipartRequest("10", `{"color":"blue"}`)
 		w := httptest.NewRecorder()
 		h.SearchImage(w, req)
@@ -310,7 +330,7 @@ func TestHandler_SearchImage(t *testing.T) {
 
 	t.Run("success fallback for invalid top_k and filters", func(t *testing.T) {
 		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil)
+		h := NewHandler(mock, nil, nil, nil)
 		req, _ := createMultipartRequest("abc", `{not_json}`)
 		w := httptest.NewRecorder()
 		h.SearchImage(w, req)
@@ -325,7 +345,7 @@ func TestHandler_SearchImage(t *testing.T) {
 
 func TestHandler_SearchImageURL(t *testing.T) {
 	t.Run("invalid json", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{}, nil, nil)
+		h := NewHandler(&mockSearchEngine{}, nil, nil, nil)
 		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{invalid`))
 		w := httptest.NewRecorder()
 		h.SearchImageURL(w, req)
@@ -334,7 +354,7 @@ func TestHandler_SearchImageURL(t *testing.T) {
 		}
 	})
 	t.Run("empty URL", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{}, nil, nil)
+		h := NewHandler(&mockSearchEngine{}, nil, nil, nil)
 		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{"url": ""}`))
 		w := httptest.NewRecorder()
 		h.SearchImageURL(w, req)
@@ -344,7 +364,7 @@ func TestHandler_SearchImageURL(t *testing.T) {
 	})
 	t.Run("success", func(t *testing.T) {
 		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil)
+		h := NewHandler(mock, nil, nil, nil)
 		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{"url": "http://x.com", "top_k": 7, "filters": {"f": "v"}}`))
 		w := httptest.NewRecorder()
 		h.SearchImageURL(w, req)

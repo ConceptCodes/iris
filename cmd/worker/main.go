@@ -111,13 +111,31 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	defer qdrantStore.Close()
 
 	engine := search.NewEngine(clipClient, qdrantStore)
-	pipeline := indexing.NewPipeline(engine, assets.NewStore(cfg.AssetDir))
+	assetStore, err := assets.NewStoreFromSettings(ctx, assets.Settings{
+		Backend:  cfg.AssetBackend,
+		LocalDir: cfg.AssetDir,
+		S3: assets.S3Config{
+			Bucket:       cfg.AssetBucket,
+			Region:       cfg.AssetRegion,
+			Endpoint:     cfg.AssetEndpoint,
+			AccessKey:    cfg.AssetAccessKey,
+			SecretKey:    cfg.AssetSecretKey,
+			SessionToken: cfg.AssetSessionKey,
+			Prefix:       cfg.AssetPrefix,
+			PublicBase:   cfg.AssetPublicBase,
+			UsePathStyle: cfg.AssetPathStyle,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	pipeline := indexing.NewPipeline(engine, assetStore)
 
 	ticker := time.NewTicker(cfg.JobPollInterval)
 	defer ticker.Stop()
 
 	for {
-		job, ok, err := jobStore.LeaseNext(ctx, time.Now().UTC(), cfg.LeaseDuration, jobs.TypeFetchImage, jobs.TypeIndexLocalFile)
+		job, ok, err := jobStore.LeaseNext(ctx, time.Now().UTC(), cfg.LeaseDuration, jobs.TypeFetchImage, jobs.TypeIndexLocalFile, jobs.TypeReindexImage)
 		if err != nil {
 			return err
 		}
@@ -163,6 +181,7 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	}
 	defer runtime.close()
 	go runtime.runCachePruneLoop(ctx, cfg)
+	go runSchedulerLoop(ctx, cfg, crawl.NewService(crawlStore, jobStore))
 
 	ticker := time.NewTicker(cfg.JobPollInterval)
 	defer ticker.Stop()
@@ -194,6 +213,42 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	}
 }
 
+func runSchedulerLoop(ctx context.Context, cfg config.Worker, service *crawl.Service) {
+	interval := cfg.SchedulePollInterval
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			processSchedules(ctx, service)
+		}
+	}
+}
+
+func processSchedules(ctx context.Context, service *crawl.Service) {
+	now := time.Now().UTC()
+	sources, err := service.DueSources(ctx, now)
+	if err != nil {
+		slog.Warn("schedule check failed", "error", err)
+		return
+	}
+	for _, source := range sources {
+		next := now.Add(source.ScheduleEvery)
+		if err := service.SetSourceNextRun(ctx, source.ID, next); err != nil {
+			slog.Warn("failed to set next run", "source_id", source.ID, "error", err)
+			continue
+		}
+		if _, err := service.TriggerRunForSource(ctx, source, "scheduled", now); err != nil {
+			slog.Warn("failed to trigger scheduled run", "source_id", source.ID, "error", err)
+		}
+	}
+}
+
 func handleIndexerJob(ctx context.Context, pipeline *indexing.Pipeline, job jobs.Job) error {
 	switch job.Type {
 	case jobs.TypeFetchImage:
@@ -214,6 +269,14 @@ func handleIndexerJob(ctx context.Context, pipeline *indexing.Pipeline, job jobs
 			return err
 		}
 		_, err := pipeline.IndexLocalFile(ctx, payload.Path)
+		return err
+	case jobs.TypeReindexImage:
+		var payload jobs.ReindexImagePayload
+		if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+			return err
+		}
+		record := models.ImageRecord{ID: payload.ID}
+		_, err := pipeline.ReindexFromURL(ctx, payload.URL, record)
 		return err
 	default:
 		return nil
@@ -668,8 +731,11 @@ func extractRunID(job jobs.Job) (string, error) {
 }
 
 func dedupKey(jobType, runID, target string) string {
-	if runID == "" || target == "" {
+	if target == "" {
 		return ""
+	}
+	if runID == "" {
+		return jobType + ":" + target
 	}
 	return jobType + ":" + runID + ":" + target
 }

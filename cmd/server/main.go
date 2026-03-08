@@ -39,7 +39,19 @@ func main() {
 	} else if cleanup != nil {
 		defer cleanup()
 	}
-	router := api.NewRouter(engine, cfg.AssetDir, crawlService, cfg.AdminAPIKey)
+	router := api.NewRouterWithAssets(engine, api.AssetsSettings{
+		Backend:    cfg.AssetBackend,
+		LocalDir:   cfg.AssetDir,
+		Bucket:     cfg.AssetBucket,
+		Region:     cfg.AssetRegion,
+		Endpoint:   cfg.AssetEndpoint,
+		AccessKey:  cfg.AssetAccessKey,
+		SecretKey:  cfg.AssetSecretKey,
+		SessionKey: cfg.AssetSessionKey,
+		Prefix:     cfg.AssetPrefix,
+		PublicBase: cfg.AssetPublicBase,
+		PathStyle:  cfg.AssetPathStyle,
+	}, crawlService, cfg.AdminAPIKey)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,
