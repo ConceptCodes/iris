@@ -3,12 +3,13 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	"iris/pkg/models"
 	pb "github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"iris/pkg/models"
 )
 
 const collectionName = "images"
@@ -88,19 +89,7 @@ func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, emb
 func (s *QdrantStore) Search(ctx context.Context, embedding models.Embedding, topK int, filters map[string]string) ([]models.SearchResult, error) {
 	var filter *pb.Filter
 	if len(filters) > 0 {
-		conditions := make([]*pb.Condition, 0, len(filters))
-		for k, v := range filters {
-			conditions = append(conditions, &pb.Condition{
-				ConditionOneOf: &pb.Condition_Field{
-					Field: &pb.FieldCondition{
-						Key: k,
-						Match: &pb.Match{
-							MatchValue: &pb.Match_Keyword{Keyword: v},
-						},
-					},
-				},
-			})
-		}
+		conditions := buildFilterConditions(filters)
 		filter = &pb.Filter{Must: conditions}
 	}
 	resp, err := s.points.Search(ctx, &pb.SearchPoints{
@@ -122,6 +111,41 @@ func (s *QdrantStore) Search(ctx context.Context, embedding models.Embedding, to
 		})
 	}
 	return results, nil
+}
+
+func (s *QdrantStore) FindIDByMeta(ctx context.Context, key, value string) (string, bool, error) {
+	if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+		return "", false, nil
+	}
+	filters := map[string]string{key: value}
+	conditions := buildFilterConditions(filters)
+	filter := &pb.Filter{Must: conditions}
+	limit := uint32(1)
+	resp, err := s.points.Scroll(ctx, &pb.ScrollPoints{
+		CollectionName: collectionName,
+		Filter:         filter,
+		Limit:          &limit,
+		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("scroll: %w", err)
+	}
+	results := resp.GetResult()
+	if len(results) == 0 {
+		return "", false, nil
+	}
+	if id := results[0].GetId(); id != nil {
+		if uuid := id.GetUuid(); uuid != "" {
+			return uuid, true, nil
+		}
+	}
+	if payload := results[0].GetPayload(); payload != nil {
+		record := s.payloadToRecord(payload)
+		if record.ID != "" {
+			return record.ID, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func (s *QdrantStore) Delete(ctx context.Context, id string) error {
@@ -220,6 +244,23 @@ func (s *QdrantStore) payloadToRecord(payload map[string]*pb.Value) models.Image
 		}
 	}
 	return record
+}
+
+func buildFilterConditions(filters map[string]string) []*pb.Condition {
+	conditions := make([]*pb.Condition, 0, len(filters))
+	for k, v := range filters {
+		conditions = append(conditions, &pb.Condition{
+			ConditionOneOf: &pb.Condition_Field{
+				Field: &pb.FieldCondition{
+					Key: k,
+					Match: &pb.Match{
+						MatchValue: &pb.Match_Keyword{Keyword: v},
+					},
+				},
+			},
+		})
+	}
+	return conditions
 }
 
 func (s *QdrantStore) Close() error {

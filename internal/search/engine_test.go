@@ -97,6 +97,8 @@ type mockStore struct {
 	lastRecord  models.ImageRecord
 	lastTopK    int
 	lastFilters map[string]string
+	findID      string
+	findOK      bool
 }
 
 func (m *mockStore) Upsert(ctx context.Context, record models.ImageRecord, embedding models.Embedding) (string, error) {
@@ -111,6 +113,10 @@ func (m *mockStore) Search(ctx context.Context, embedding models.Embedding, topK
 func (m *mockStore) GetVector(ctx context.Context, id string) (models.Embedding, error) {
 	m.lastID = id
 	return m.emb, m.err
+}
+
+func (m *mockStore) FindIDByMeta(ctx context.Context, key, value string) (string, bool, error) {
+	return m.findID, m.findOK, m.err
 }
 
 func TestEngine_IndexFromURL(t *testing.T) {
@@ -157,6 +163,26 @@ func TestEngine_IndexFromBytes(t *testing.T) {
 		e.IndexFromBytes(context.Background(), []byte("data"), models.ImageRecord{ID: "my-id"})
 		if ms.lastRecord.ID != "my-id" {
 			t.Errorf("provided ID overwritten")
+		}
+	})
+	t.Run("dedupe returns existing", func(t *testing.T) {
+		ms := &mockStore{findID: "existing", findOK: true}
+		e := NewEngine(&mockClip{}, ms)
+		id, err := e.IndexFromBytes(context.Background(), []byte("data"), models.ImageRecord{Meta: map[string]string{"content_sha256": "abc"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id != "existing" {
+			t.Fatalf("expected existing id")
+		}
+	})
+
+	t.Run("FindExistingID passthrough", func(t *testing.T) {
+		ms := &mockStore{findID: "existing", findOK: true}
+		e := NewEngine(&mockClip{}, ms)
+		id, ok, err := e.FindExistingID(context.Background(), map[string]string{"content_sha256": "abc"}, "")
+		if err != nil || !ok || id != "existing" {
+			t.Fatalf("unexpected result: id=%s ok=%v err=%v", id, ok, err)
 		}
 	})
 }

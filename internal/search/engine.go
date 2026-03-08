@@ -6,8 +6,8 @@ import (
 	"math"
 	"reflect"
 
-	"iris/pkg/models"
 	"github.com/google/uuid"
+	"iris/pkg/models"
 )
 
 const defaultTopK = 20
@@ -15,10 +15,12 @@ const defaultTopK = 20
 type Engine interface {
 	IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error)
 	IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error)
+	ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error)
 	SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error)
 	SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error)
 	SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error)
 	GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error)
+	FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error)
 }
 
 type ClipClient interface {
@@ -31,6 +33,7 @@ type VectorStore interface {
 	Upsert(ctx context.Context, record models.ImageRecord, embedding models.Embedding) (string, error)
 	Search(ctx context.Context, embedding models.Embedding, topK int, filters map[string]string) ([]models.SearchResult, error)
 	GetVector(ctx context.Context, id string) (models.Embedding, error)
+	FindIDByMeta(ctx context.Context, key, value string) (string, bool, error)
 }
 
 type engineImpl struct {
@@ -48,6 +51,11 @@ func NewEngine(clipClient ClipClient, qdrantStore VectorStore) Engine {
 func (e *engineImpl) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
 	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
 		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
+	if existing, ok, err := e.FindExistingID(ctx, req.Meta, req.URL); err != nil {
+		return "", err
+	} else if ok {
+		return existing, nil
 	}
 	embedding, err := e.clip.EmbedImageURL(ctx, req.URL)
 	if err != nil {
@@ -68,8 +76,34 @@ func (e *engineImpl) IndexFromBytes(ctx context.Context, imageBytes []byte, reco
 	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
 		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
 	}
+	if existing, ok, err := e.FindExistingID(ctx, record.Meta, ""); err != nil {
+		return "", err
+	} else if ok {
+		return existing, nil
+	}
 	if record.ID == "" {
 		record.ID = uuid.New().String()
+	}
+	embedding, err := e.clip.EmbedImageBytes(ctx, imageBytes)
+	if err != nil {
+		return "", err
+	}
+	normalize(embedding)
+	return e.store.Upsert(ctx, record, embedding)
+}
+
+func (e *engineImpl) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
+		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
+	}
+	if record.ID == "" {
+		if existing, ok, err := e.FindExistingID(ctx, record.Meta, ""); err != nil {
+			return "", err
+		} else if ok {
+			record.ID = existing
+		} else {
+			record.ID = uuid.New().String()
+		}
 	}
 	embedding, err := e.clip.EmbedImageBytes(ctx, imageBytes)
 	if err != nil {
@@ -137,6 +171,34 @@ func (e *engineImpl) GetSimilar(ctx context.Context, id string, topK int) ([]mod
 		return nil, err
 	}
 	return e.store.Search(ctx, embedding, topK+1, nil)
+}
+
+func (e *engineImpl) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	if hash := meta["content_sha256"]; hash != "" {
+		if id, ok, err := e.store.FindIDByMeta(ctx, "meta_content_sha256", hash); err != nil {
+			return "", false, err
+		} else if ok {
+			return id, true, nil
+		}
+	}
+	if source := meta["source_url"]; source != "" {
+		if id, ok, err := e.store.FindIDByMeta(ctx, "meta_source_url", source); err != nil {
+			return "", false, err
+		} else if ok {
+			return id, true, nil
+		}
+	}
+	if fallbackURL != "" {
+		if id, ok, err := e.store.FindIDByMeta(ctx, "meta_source_url", fallbackURL); err != nil {
+			return "", false, err
+		} else if ok {
+			return id, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func normalize(vec models.Embedding) {

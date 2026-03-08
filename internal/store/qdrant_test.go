@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"iris/pkg/models"
 	pb "github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
+	"iris/pkg/models"
 )
 
 func TestNewQdrantStore_Timeout(t *testing.T) {
@@ -97,6 +97,8 @@ type mockPointsClient struct {
 	deleteErr  error
 	getResp    *pb.GetResponse
 	getErr     error
+	scrollResp *pb.ScrollResponse
+	scrollErr  error
 
 	lastTopK   uint64
 	lastFilter *pb.Filter
@@ -115,6 +117,10 @@ func (m *mockPointsClient) Delete(ctx context.Context, in *pb.DeletePoints, opts
 }
 func (m *mockPointsClient) Get(ctx context.Context, in *pb.GetPoints, opts ...grpc.CallOption) (*pb.GetResponse, error) {
 	return m.getResp, m.getErr
+}
+
+func (m *mockPointsClient) Scroll(ctx context.Context, in *pb.ScrollPoints, opts ...grpc.CallOption) (*pb.ScrollResponse, error) {
+	return m.scrollResp, m.scrollErr
 }
 
 func TestQdrantStore_DataOperations(t *testing.T) {
@@ -177,6 +183,19 @@ func TestQdrantStore_DataOperations(t *testing.T) {
 		vec, err := s.GetVector(context.Background(), "x")
 		if err != nil || vec[0] != 4.2 {
 			t.Errorf("expected success with 4.2")
+		}
+	})
+
+	t.Run("FindIDByMeta", func(t *testing.T) {
+		mc := &mockPointsClient{
+			scrollResp: &pb.ScrollResponse{Result: []*pb.RetrievedPoint{
+				{Payload: map[string]*pb.Value{"id": {Kind: &pb.Value_StringValue{StringValue: "point-id"}}}},
+			}},
+		}
+		s := &QdrantStore{points: mc}
+		id, ok, err := s.FindIDByMeta(context.Background(), "meta_content_sha256", "hash")
+		if err != nil || !ok || id != "point-id" {
+			t.Fatalf("expected id from scroll, got %q ok=%v err=%v", id, ok, err)
 		}
 	})
 }

@@ -38,6 +38,9 @@ func (m *mockSearchEngine) IndexFromURL(ctx context.Context, req models.IndexReq
 func (m *mockSearchEngine) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
 	return m.id, m.err
 }
+func (m *mockSearchEngine) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	return m.id, m.err
+}
 func (m *mockSearchEngine) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
 	return m.res, m.err
 }
@@ -49,6 +52,10 @@ func (m *mockSearchEngine) SearchByImageURL(ctx context.Context, url string, top
 }
 func (m *mockSearchEngine) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
 	return m.res, m.err
+}
+
+func (m *mockSearchEngine) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {
+	return "", false, m.err
 }
 
 func TestSearchResults(t *testing.T) {
