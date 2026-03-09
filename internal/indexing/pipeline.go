@@ -50,6 +50,7 @@ type Pipeline struct {
 type PipelineOptions struct {
 	MaxFetchBytes            int
 	FetchClient              *http.Client
+	UserAgent                string
 	SSRFAllowPrivateNetworks bool
 }
 
@@ -60,6 +61,7 @@ func NewPipeline(engine Engine, assetStore assets.Store) *Pipeline {
 		options: PipelineOptions{
 			MaxFetchBytes: constants.MaxImageSize,
 			FetchClient:   &http.Client{Timeout: constants.HTTPTimeout30s},
+			UserAgent:     constants.DefaultCrawlerUserAgent,
 		},
 	}
 }
@@ -70,6 +72,9 @@ func NewPipelineWithOptions(engine Engine, assetStore assets.Store, options Pipe
 	}
 	if options.FetchClient == nil {
 		options.FetchClient = &http.Client{Timeout: constants.HTTPTimeout30s}
+	}
+	if strings.TrimSpace(options.UserAgent) == "" {
+		options.UserAgent = constants.DefaultCrawlerUserAgent
 	}
 	return &Pipeline{
 		engine:     engine,
@@ -90,7 +95,7 @@ func (p *Pipeline) IndexFromURLResult(ctx context.Context, req models.IndexReque
 	if req.URL == "" {
 		return Result{}, fmt.Errorf("url is required")
 	}
-	imageBytes, mimeType, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes, p.options.SSRFAllowPrivateNetworks)
+	imageBytes, mimeType, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes, p.options.UserAgent, p.options.SSRFAllowPrivateNetworks)
 	if err != nil {
 		return Result{}, err
 	}
@@ -165,7 +170,7 @@ func (p *Pipeline) ReindexFromURLResult(ctx context.Context, imageURL string, re
 	if imageURL == "" {
 		return Result{}, fmt.Errorf("url is required")
 	}
-	imageBytes, mimeType, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes, p.options.SSRFAllowPrivateNetworks)
+	imageBytes, mimeType, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes, p.options.UserAgent, p.options.SSRFAllowPrivateNetworks)
 	if err != nil {
 		return Result{}, err
 	}
@@ -251,12 +256,15 @@ func dedupeReason(meta map[string]string) string {
 	return "unknown"
 }
 
-func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int, ssrfAllowPrivateNetworks bool) ([]byte, string, error) {
+func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int, userAgent string, ssrfAllowPrivateNetworks bool) ([]byte, string, error) {
 	if client == nil {
 		client = &http.Client{Timeout: constants.HTTPTimeout30s}
 	}
 	if maxBytes <= 0 {
 		maxBytes = constants.MaxImageSize
+	}
+	if strings.TrimSpace(userAgent) == "" {
+		userAgent = constants.DefaultCrawlerUserAgent
 	}
 
 	validator := ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(ssrfAllowPrivateNetworks))
@@ -268,6 +276,7 @@ func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, ma
 	if err != nil {
 		return nil, "", fmt.Errorf("create request: %w", err)
 	}
+	req.Header.Set(constants.HeaderUserAgent, userAgent)
 
 	safeClient := validator.NewSafeClient(constants.HTTPTimeout30s)
 

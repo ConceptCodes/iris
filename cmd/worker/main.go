@@ -225,7 +225,12 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	if err != nil {
 		return err
 	}
-	pipeline := indexing.NewPipeline(engine, assetStore)
+	pipeline := indexing.NewPipelineWithOptions(engine, assetStore, indexing.PipelineOptions{
+		MaxFetchBytes:            cfg.MaxImageBytes,
+		FetchClient:              &http.Client{Timeout: cfg.FetchTimeout},
+		UserAgent:                cfg.UserAgent,
+		SSRFAllowPrivateNetworks: cfg.SSRFAllowPrivateNetworks,
+	})
 
 	ticker := time.NewTicker(cfg.JobPollInterval)
 	defer ticker.Stop()

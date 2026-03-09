@@ -49,10 +49,14 @@ func (m *mockEngine) FindExistingID(ctx context.Context, meta map[string]string,
 func TestPipelineIndexFromURL(t *testing.T) {
 	engine := &mockEngine{id: "url-id"}
 	pipeline := NewPipelineWithOptions(engine, nil, PipelineOptions{
+		UserAgent:                "test-agent/1.0",
 		SSRFAllowPrivateNetworks: true,
 	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); got != "test-agent/1.0" {
+			t.Fatalf("unexpected user agent: %q", got)
+		}
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write([]byte("image-bytes"))
 	}))
@@ -165,10 +169,14 @@ func TestPipelineIndexLocalFile(t *testing.T) {
 func TestPipelineReindexFromURL(t *testing.T) {
 	engine := &mockEngine{id: "reindex-id"}
 	pipeline := NewPipelineWithOptions(engine, nil, PipelineOptions{
+		UserAgent:                "test-agent/1.0",
 		SSRFAllowPrivateNetworks: true,
 	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); got != "test-agent/1.0" {
+			t.Fatalf("unexpected user agent: %q", got)
+		}
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte("reindex-bytes"))
 	}))
