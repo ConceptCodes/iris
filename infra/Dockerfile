@@ -14,7 +14,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/worker ./cmd/work
 
 # ── Server runtime ────────────────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12 AS server
+WORKDIR /app
 COPY --from=builder /bin/server /server
+COPY --from=builder /app/web/static /app/web/static
 EXPOSE 8080
 ENTRYPOINT ["/server"]
 
