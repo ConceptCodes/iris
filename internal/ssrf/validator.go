@@ -35,6 +35,16 @@ const (
 	BlockReasonMetadataEndpoint BlockReason = "metadata_endpoint"
 )
 
+type ipResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+type netResolver struct {
+	*net.Resolver
+}
+
+var _ ipResolver = (*netResolver)(nil)
+
 var (
 	// ErrInvalidScheme is returned when the URL scheme is not HTTP or HTTPS.
 	ErrInvalidScheme = &ValidationError{Reason: BlockReasonInvalidScheme, Message: "only HTTP and HTTPS schemes are allowed"}
@@ -80,7 +90,7 @@ func (e *ValidationError) Is(target error) bool {
 
 // Validator performs SSRF protection by validating URLs against blocked IP ranges.
 type Validator struct {
-	resolver             *net.Resolver
+	resolver             ipResolver
 	blockedNetworks      []*net.IPNet
 	metadataEndpoints    []net.IP
 	allowPrivateNetworks bool
@@ -88,6 +98,14 @@ type Validator struct {
 
 // ValidatorOption configures a Validator.
 type ValidatorOption func(*Validator)
+
+// withResolver sets a custom DNS resolver for the validator.
+// This is primarily useful for testing with fake DNS responses.
+func withResolver(resolver ipResolver) ValidatorOption {
+	return func(v *Validator) {
+		v.resolver = resolver
+	}
+}
 
 // WithAllowPrivateNetworks allows private network addresses (RFC1918, loopback, link-local).
 // This should only be used in development/testing environments.
@@ -100,7 +118,7 @@ func WithAllowPrivateNetworks(allow bool) ValidatorOption {
 // NewValidator creates a new SSRF validator with default blocked IP ranges.
 func NewValidator(opts ...ValidatorOption) *Validator {
 	v := &Validator{
-		resolver: net.DefaultResolver,
+		resolver: &netResolver{net.DefaultResolver},
 	}
 	for _, opt := range opts {
 		opt(v)
