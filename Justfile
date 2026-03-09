@@ -12,6 +12,12 @@ build:
 test:
   go test ./...
 
+templ:
+  go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate
+
+templ-watch:
+  go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate -watch
+
 dev:
   docker compose -f infra/docker-compose.yml up --build
 
