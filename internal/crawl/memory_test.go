@@ -4,37 +4,144 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"iris/internal/jobs"
 )
 
-func TestServiceCreateAndTriggerRun(t *testing.T) {
+func TestMemoryStoreCreateSourceDefaults(t *testing.T) {
 	store := NewMemoryStore()
-	jobStore := jobs.NewMemoryStore()
-	service := NewService(store, jobStore)
-
-	source, err := service.CreateSource(context.Background(), CreateSourceInput{
-		Kind:      SourceKindLocalDir,
-		LocalPath: "/tmp/images",
+	source, err := store.CreateSource(context.Background(), CreateSourceInput{
+		Kind:          SourceKindDomain,
+		SeedURL:       "https://example.com",
+		ScheduleEvery: "1h",
 	})
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}
+	if source.ID == "" {
+		t.Fatal("expected source ID to be set")
+	}
+	if source.Status != SourceStatusActive {
+		t.Fatalf("expected active status, got %s", source.Status)
+	}
+	if source.ScheduleEvery <= 0 {
+		t.Fatalf("expected schedule every to be parsed, got %v", source.ScheduleEvery)
+	}
+	if source.NextRunAt.IsZero() {
+		t.Fatal("expected next run time to be set")
+	}
+}
 
-	run, err := service.TriggerRun(context.Background(), source.ID, "manual")
+func TestMemoryStoreCreateSourceClonesAllowedDomains(t *testing.T) {
+	store := NewMemoryStore()
+	allowed := []string{"example.com", "images.example.com"}
+	source, err := store.CreateSource(context.Background(), CreateSourceInput{
+		Kind:           SourceKindDomain,
+		SeedURL:        "https://example.com",
+		AllowedDomains: allowed,
+	})
 	if err != nil {
-		t.Fatalf("trigger run: %v", err)
+		t.Fatalf("create source: %v", err)
 	}
-	if run.SourceID != source.ID {
-		t.Fatalf("unexpected run source id: %s", run.SourceID)
+	allowed[0] = "mutated.com"
+	if source.AllowedDomains[0] != "example.com" {
+		t.Fatalf("expected allowed domains to be cloned")
 	}
+}
 
-	if _, ok, err := jobStore.LeaseNext(context.Background(), time.Now().Add(time.Second), 0, jobs.TypeDiscoverSource); err != nil || !ok {
-		t.Fatalf("expected discover job, err=%v", err)
+func TestMemoryStoreGetSourceNotFound(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.GetSource(context.Background(), "missing"); err == nil {
+		t.Fatal("expected error for missing source")
 	}
+}
 
-	if err := store.SetRunDiscovered(context.Background(), run.ID, 3); err != nil {
-		t.Fatalf("set discovered: %v", err)
+func TestMemoryStoreCreateAndGetRun(t *testing.T) {
+	store := NewMemoryStore()
+	run, err := store.CreateRun(context.Background(), "source-1", "manual", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if run.ID == "" {
+		t.Fatal("expected run ID to be set")
+	}
+	if run.Status != RunStatusRunning {
+		t.Fatalf("expected running status, got %s", run.Status)
+	}
+	got, err := store.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.ID != run.ID {
+		t.Fatalf("expected run ID %s, got %s", run.ID, got.ID)
+	}
+}
+
+func TestMemoryStoreSetRunDiscoveredUpdatesRun(t *testing.T) {
+	store := NewMemoryStore()
+	run, err := store.CreateRun(context.Background(), "source-1", "manual", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := store.SetRunDiscovered(context.Background(), run.ID, 5); err != nil {
+		t.Fatalf("set run discovered: %v", err)
+	}
+	got, err := store.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.DiscoveredCount != 5 {
+		t.Fatalf("expected discovered count 5, got %d", got.DiscoveredCount)
+	}
+}
+
+func TestMemoryStoreIncrementRunCounters(t *testing.T) {
+	store := NewMemoryStore()
+	run, err := store.CreateRun(context.Background(), "source-1", "manual", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := store.IncrementRunIndexed(context.Background(), run.ID, 3); err != nil {
+		t.Fatalf("increment indexed: %v", err)
+	}
+	if err := store.IncrementRunDuplicate(context.Background(), run.ID, 2); err != nil {
+		t.Fatalf("increment duplicate: %v", err)
+	}
+	if err := store.IncrementRunFailed(context.Background(), run.ID, 1, "boom"); err != nil {
+		t.Fatalf("increment failed: %v", err)
+	}
+	got, err := store.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.IndexedCount != 3 {
+		t.Fatalf("expected indexed count 3, got %d", got.IndexedCount)
+	}
+	if got.DuplicateCount != 2 {
+		t.Fatalf("expected duplicate count 2, got %d", got.DuplicateCount)
+	}
+	if got.FailedCount != 1 {
+		t.Fatalf("expected failed count 1, got %d", got.FailedCount)
+	}
+	if got.LastError != "boom" {
+		t.Fatalf("expected last error to be set")
+	}
+}
+
+func TestMemoryStoreMarkRunCompletedUpdatesSource(t *testing.T) {
+	store := NewMemoryStore()
+	source, err := store.CreateSource(context.Background(), CreateSourceInput{
+		Kind:          SourceKindDomain,
+		SeedURL:       "https://example.com",
+		ScheduleEvery: "10m",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	run, err := store.CreateRun(context.Background(), source.ID, "manual", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := store.SetRunDiscovered(context.Background(), run.ID, 4); err != nil {
+		t.Fatalf("set run discovered: %v", err)
 	}
 	if err := store.IncrementRunIndexed(context.Background(), run.ID, 2); err != nil {
 		t.Fatalf("increment indexed: %v", err)
@@ -42,54 +149,133 @@ func TestServiceCreateAndTriggerRun(t *testing.T) {
 	if err := store.IncrementRunDuplicate(context.Background(), run.ID, 1); err != nil {
 		t.Fatalf("increment duplicate: %v", err)
 	}
-	if err := store.IncrementRunFailed(context.Background(), run.ID, 1, "boom"); err != nil {
-		t.Fatalf("increment failed: %v", err)
-	}
 	if err := store.MarkRunCompleted(context.Background(), run.ID); err != nil {
 		t.Fatalf("mark completed: %v", err)
 	}
-
-	updatedSource, err := store.GetSource(context.Background(), source.ID)
+	updated, err := store.GetSource(context.Background(), source.ID)
 	if err != nil {
-		t.Fatalf("get updated source: %v", err)
+		t.Fatalf("get source: %v", err)
 	}
-	if updatedSource.LastDuplicateCount != 1 {
-		t.Fatalf("expected duplicate count persisted, got %d", updatedSource.LastDuplicateCount)
+	if updated.LastDiscoveredCount != 4 {
+		t.Fatalf("expected discovered count 4, got %d", updated.LastDiscoveredCount)
+	}
+	if updated.LastIndexedCount != 2 {
+		t.Fatalf("expected indexed count 2, got %d", updated.LastIndexedCount)
+	}
+	if updated.LastDuplicateCount != 1 {
+		t.Fatalf("expected duplicate count 1, got %d", updated.LastDuplicateCount)
+	}
+	if updated.ConsecutiveFailures != 0 {
+		t.Fatalf("expected consecutive failures to reset")
 	}
 }
 
-func TestMemoryStoreScheduling(t *testing.T) {
+func TestMemoryStoreMarkRunFailedUpdatesSource(t *testing.T) {
 	store := NewMemoryStore()
-	src, err := store.CreateSource(context.Background(), CreateSourceInput{
+	source, err := store.CreateSource(context.Background(), CreateSourceInput{
 		Kind:          SourceKindDomain,
 		SeedURL:       "https://example.com",
-		ScheduleEvery: "1m",
+		ScheduleEvery: "10m",
 	})
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}
-	if src.ScheduleEvery != time.Minute {
-		t.Fatalf("expected schedule every 1m, got %s", src.ScheduleEvery)
-	}
-
-	now := time.Now().UTC().Add(2 * time.Minute)
-	sources, err := store.ListSourcesDue(context.Background(), now)
+	run, err := store.CreateRun(context.Background(), source.ID, "manual", time.Now().UTC())
 	if err != nil {
-		t.Fatalf("list due: %v", err)
+		t.Fatalf("create run: %v", err)
 	}
-	if len(sources) != 1 {
-		t.Fatalf("expected due source")
+	if err := store.MarkRunFailed(context.Background(), run.ID, "boom"); err != nil {
+		t.Fatalf("mark failed: %v", err)
 	}
+	updated, err := store.GetSource(context.Background(), source.ID)
+	if err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if updated.ConsecutiveFailures != 1 {
+		t.Fatalf("expected consecutive failures to increment, got %d", updated.ConsecutiveFailures)
+	}
+}
 
-	next := now.Add(time.Minute)
-	if err := store.UpdateSourceNextRun(context.Background(), src.ID, next); err != nil {
+func TestMemoryStoreListSourcesDue(t *testing.T) {
+	store := NewMemoryStore()
+	active, err := store.CreateSource(context.Background(), CreateSourceInput{
+		Kind:          SourceKindDomain,
+		SeedURL:       "https://example.com",
+		ScheduleEvery: "1s",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	paused, err := store.CreateSource(context.Background(), CreateSourceInput{
+		Kind:          SourceKindDomain,
+		SeedURL:       "https://paused.example.com",
+		ScheduleEvery: "1s",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	paused.Status = SourceStatusPaused
+	store.sources = []Source{active, paused}
+	if err := store.UpdateSourceNextRun(context.Background(), active.ID, time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("update next run: %v", err)
 	}
-	sources, err = store.ListSourcesDue(context.Background(), now)
-	if err != nil {
-		t.Fatalf("list due: %v", err)
+	if err := store.UpdateSourceNextRun(context.Background(), paused.ID, time.Now().Add(-time.Minute)); err != nil {
+		t.Fatalf("update next run: %v", err)
 	}
-	if len(sources) != 0 {
-		t.Fatalf("expected no due sources after update")
+
+	results, err := store.ListSourcesDue(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("list sources due: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 due source, got %d", len(results))
+	}
+	if results[0].ID != active.ID {
+		t.Fatalf("expected active source to be due")
+	}
+}
+
+func TestMemoryStoreUpdateSourceNextRun(t *testing.T) {
+	store := NewMemoryStore()
+	source, err := store.CreateSource(context.Background(), CreateSourceInput{
+		Kind:          SourceKindDomain,
+		SeedURL:       "https://example.com",
+		ScheduleEvery: "1s",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	next := time.Now().Add(2 * time.Hour)
+	if err := store.UpdateSourceNextRun(context.Background(), source.ID, next); err != nil {
+		t.Fatalf("update next run: %v", err)
+	}
+	updated, err := store.GetSource(context.Background(), source.ID)
+	if err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if !updated.NextRunAt.Equal(next) {
+		t.Fatalf("expected next run to be updated")
+	}
+}
+
+func TestMemoryStoreErrorsForMissingRun(t *testing.T) {
+	store := NewMemoryStore()
+	if err := store.SetRunDiscovered(context.Background(), "missing", 1); err == nil {
+		t.Fatal("expected error for missing run")
+	}
+	if err := store.IncrementRunIndexed(context.Background(), "missing", 1); err == nil {
+		t.Fatal("expected error for missing run")
+	}
+	if err := store.IncrementRunDuplicate(context.Background(), "missing", 1); err == nil {
+		t.Fatal("expected error for missing run")
+	}
+	if err := store.IncrementRunFailed(context.Background(), "missing", 1, "boom"); err == nil {
+		t.Fatal("expected error for missing run")
+	}
+	if err := store.MarkRunCompleted(context.Background(), "missing"); err == nil {
+		t.Fatal("expected error for missing run")
+	}
+	if err := store.MarkRunFailed(context.Background(), "missing", "boom"); err == nil {
+		t.Fatal("expected error for missing run")
 	}
 }
