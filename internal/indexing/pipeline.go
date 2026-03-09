@@ -15,6 +15,7 @@ import (
 	"iris/internal/assets"
 	"iris/internal/constants"
 	"iris/internal/metrics"
+	"iris/internal/ssrf"
 	"iris/pkg/models"
 
 	"github.com/google/uuid"
@@ -47,8 +48,9 @@ type Pipeline struct {
 }
 
 type PipelineOptions struct {
-	MaxFetchBytes int
-	FetchClient   *http.Client
+	MaxFetchBytes            int
+	FetchClient              *http.Client
+	SSRFAllowPrivateNetworks bool
 }
 
 func NewPipeline(engine Engine, assetStore assets.Store) *Pipeline {
@@ -88,7 +90,7 @@ func (p *Pipeline) IndexFromURLResult(ctx context.Context, req models.IndexReque
 	if req.URL == "" {
 		return Result{}, fmt.Errorf("url is required")
 	}
-	imageBytes, mimeType, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes)
+	imageBytes, mimeType, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes, p.options.SSRFAllowPrivateNetworks)
 	if err != nil {
 		return Result{}, err
 	}
@@ -163,7 +165,7 @@ func (p *Pipeline) ReindexFromURLResult(ctx context.Context, imageURL string, re
 	if imageURL == "" {
 		return Result{}, fmt.Errorf("url is required")
 	}
-	imageBytes, mimeType, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes)
+	imageBytes, mimeType, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes, p.options.SSRFAllowPrivateNetworks)
 	if err != nil {
 		return Result{}, err
 	}
@@ -207,26 +209,31 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 			return Result{ID: existing, Status: ResultStatusDuplicate}, nil
 		}
 	}
-	if p.assetStore != nil {
-		assetURL, err := p.assetStore.Save(record.ID, record.Filename, imageBytes)
-		if err != nil {
-			return Result{}, fmt.Errorf("store image asset: %w", err)
-		}
-		record.URL = assetURL
-	}
-	if record.Meta[constants.MetaKeySourceURL] == "" && record.URL != "" {
-		record.Meta[constants.MetaKeySourceURL] = record.URL
-	}
+	var id string
+	var err error
 	if force {
-		id, err := p.engine.ReindexFromBytes(ctx, imageBytes, record)
+		id, err = p.engine.ReindexFromBytes(ctx, imageBytes, record)
 		if err != nil {
 			return Result{}, err
 		}
-		return Result{ID: id, Status: ResultStatusReindexed}, nil
+	} else {
+		id, err = p.engine.IndexFromBytes(ctx, imageBytes, record)
+		if err != nil {
+			return Result{}, err
+		}
 	}
-	id, err := p.engine.IndexFromBytes(ctx, imageBytes, record)
-	if err != nil {
-		return Result{}, err
+	if p.assetStore != nil {
+		assetURL, err := p.assetStore.Save(record.ID, record.Filename, imageBytes)
+		if err != nil {
+			return Result{ID: id, Status: ResultStatusIndexed}, fmt.Errorf("store image asset: %w (vector record created without asset URL)", err)
+		}
+		record.URL = assetURL
+		if record.Meta[constants.MetaKeySourceURL] == "" {
+			record.Meta[constants.MetaKeySourceURL] = assetURL
+		}
+	}
+	if force {
+		return Result{ID: id, Status: ResultStatusReindexed}, nil
 	}
 	return Result{ID: id, Status: ResultStatusIndexed}, nil
 }
@@ -244,13 +251,19 @@ func dedupeReason(meta map[string]string) string {
 	return "unknown"
 }
 
-func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int) ([]byte, string, error) {
+func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int, ssrfAllowPrivateNetworks bool) ([]byte, string, error) {
 	if client == nil {
 		client = &http.Client{Timeout: constants.HTTPTimeout30s}
 	}
 	if maxBytes <= 0 {
 		maxBytes = constants.MaxImageSize
 	}
+
+	validator := ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(ssrfAllowPrivateNetworks))
+	if err := validator.ValidateURL(ctx, rawURL); err != nil {
+		return nil, "", fmt.Errorf("SSRF blocked: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("create request: %w", err)

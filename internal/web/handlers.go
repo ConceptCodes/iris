@@ -7,6 +7,7 @@ import (
 	"github.com/a-h/templ"
 	"iris/internal/constants"
 	"iris/internal/search"
+	"iris/internal/ssrf"
 	"iris/pkg/models"
 	"iris/web/templates"
 )
@@ -124,18 +125,25 @@ func (h *Handlers) ReverseImageSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) ReverseImageSearchURL(w http.ResponseWriter, r *http.Request) {
-	url := r.FormValue("url")
-	if url == "" {
+	imageURL := r.FormValue("url")
+	if imageURL == "" {
 		http.Error(w, constants.ErrorMsgURLRequired, http.StatusBadRequest)
 		return
 	}
-	results, err := h.engine.SearchByImageURL(r.Context(), url, constants.DefaultLimit40, nil)
+
+	validator := ssrf.NewValidator()
+	if err := validator.ValidateURL(r.Context(), imageURL); err != nil {
+		http.Error(w, "SSRF blocked: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	results, err := h.engine.SearchByImageURL(r.Context(), imageURL, constants.DefaultLimit40, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if r.Header.Get(constants.HeaderHXRequest) == "true" {
-		templ.Handler(templates.ResultsGrid(results, url, 1)).ServeHTTP(w, r)
+		templ.Handler(templates.ResultsGrid(results, imageURL, 1)).ServeHTTP(w, r)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)

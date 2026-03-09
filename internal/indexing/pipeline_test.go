@@ -18,7 +18,7 @@ type mockEngine struct {
 	findID     string
 	findOK     bool
 	lastReq    models.IndexRequest
-	lastRecord models.ImageRecord
+	lastRecord *models.ImageRecord
 	lastBytes  []byte
 	force      bool
 }
@@ -30,14 +30,14 @@ func (m *mockEngine) IndexFromURL(ctx context.Context, req models.IndexRequest) 
 
 func (m *mockEngine) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
 	m.lastBytes = append([]byte(nil), imageBytes...)
-	m.lastRecord = record
+	m.lastRecord = &record
 	m.force = false
 	return m.id, nil
 }
 
 func (m *mockEngine) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
 	m.lastBytes = append([]byte(nil), imageBytes...)
-	m.lastRecord = record
+	m.lastRecord = &record
 	m.force = true
 	return m.id, nil
 }
@@ -48,7 +48,9 @@ func (m *mockEngine) FindExistingID(ctx context.Context, meta map[string]string,
 
 func TestPipelineIndexFromURL(t *testing.T) {
 	engine := &mockEngine{id: "url-id"}
-	pipeline := NewPipeline(engine, nil)
+	pipeline := NewPipelineWithOptions(engine, nil, PipelineOptions{
+		SSRFAllowPrivateNetworks: true,
+	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -66,7 +68,7 @@ func TestPipelineIndexFromURL(t *testing.T) {
 	if id != "url-id" {
 		t.Fatalf("unexpected id: %s", id)
 	}
-	if engine.lastRecord.Meta["source_url"] == "" {
+	if engine.lastRecord == nil || engine.lastRecord.Meta["source_url"] == "" {
 		t.Fatalf("expected source_url metadata")
 	}
 	if engine.lastRecord.Meta["content_sha256"] == "" {
@@ -92,7 +94,7 @@ func TestPipelineIndexUploadedBytesStoresAsset(t *testing.T) {
 	if id != "upload-id" {
 		t.Fatalf("unexpected id: %s", id)
 	}
-	if engine.lastRecord.URL == "" || !strings.HasPrefix(engine.lastRecord.URL, "/assets/") {
+	if engine.lastRecord == nil || engine.lastRecord.URL == "" || !strings.HasPrefix(engine.lastRecord.URL, "/assets/") {
 		t.Fatalf("expected asset url, got %q", engine.lastRecord.URL)
 	}
 	files, err := os.ReadDir(assetDir)
@@ -162,7 +164,9 @@ func TestPipelineIndexLocalFile(t *testing.T) {
 
 func TestPipelineReindexFromURL(t *testing.T) {
 	engine := &mockEngine{id: "reindex-id"}
-	pipeline := NewPipeline(engine, nil)
+	pipeline := NewPipelineWithOptions(engine, nil, PipelineOptions{
+		SSRFAllowPrivateNetworks: true,
+	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")

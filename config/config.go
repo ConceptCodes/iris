@@ -8,32 +8,33 @@ import (
 )
 
 const (
-	defaultClipAddr        = "http://localhost:8001"
-	defaultQdrantAddr      = "localhost:6334"
-	defaultClipDim         = 512
-	defaultHTTPAddr        = ":8080"
-	defaultConcurrency     = 4
-	defaultAssetDir        = "./data/assets"
-	defaultAssetBackend    = "local"
-	defaultAssetBucket     = ""
-	defaultAssetRegion     = ""
-	defaultAssetEndpoint   = ""
-	defaultAssetPrefix     = ""
-	defaultAssetPublicBase = ""
-	defaultWorkerMode      = "indexer"
-	defaultJobBackend      = "memory"
-	defaultJobStoreDSN     = "postgres://iris:iris@localhost:5432/iris?sslmode=disable"
-	defaultAdminAPIKey     = ""
-	defaultFetchRetries    = 2
-	defaultHostConcurrency = 2
-	defaultCachePruneBatch = 500
-	defaultMaxImageBytes   = 20 << 20
-	defaultFetchTimeout    = 30 * time.Second
-	defaultUserAgent       = "iris/1.0"
-	defaultCrawlMaxDepth   = 1
-	defaultCrawlRPS        = 0
-	defaultOtelEnabled     = true
-	defaultOtelEndpoint    = "localhost:4317"
+	defaultClipAddr             = "http://localhost:8001"
+	defaultQdrantAddr           = "localhost:6334"
+	defaultClipDim              = 512
+	defaultHTTPAddr             = ":8080"
+	defaultConcurrency          = 4
+	defaultAssetDir             = "./data/assets"
+	defaultAssetBackend         = "local"
+	defaultAssetBucket          = ""
+	defaultAssetRegion          = ""
+	defaultAssetEndpoint        = ""
+	defaultAssetPrefix          = ""
+	defaultAssetPublicBase      = ""
+	defaultWorkerMode           = "indexer"
+	defaultJobBackend           = "memory"
+	defaultJobStoreDSN          = "postgres://iris:iris@localhost:5432/iris?sslmode=disable"
+	defaultAdminAPIKey          = ""
+	defaultFetchRetries         = 2
+	defaultHostConcurrency      = 2
+	defaultCachePruneBatch      = 500
+	defaultMaxImageBytes        = 20 << 20
+	defaultFetchTimeout         = 30 * time.Second
+	defaultUserAgent            = "iris/1.0"
+	defaultCrawlMaxDepth        = 1
+	defaultCrawlRPS             = 0
+	defaultOtelEnabled          = true
+	defaultOtelEndpoint         = "localhost:4317"
+	defaultSSRFAllowPrivateNets = false
 )
 
 const (
@@ -42,22 +43,23 @@ const (
 )
 
 type Shared struct {
-	ClipAddr        string
-	QdrantAddr      string
-	ClipDim         int
-	AssetDir        string
-	AssetBackend    string
-	AssetBucket     string
-	AssetRegion     string
-	AssetEndpoint   string
-	AssetAccessKey  string
-	AssetSecretKey  string
-	AssetSessionKey string
-	AssetPrefix     string
-	AssetPublicBase string
-	AssetPathStyle  bool
-	OtelEnabled     bool
-	OtelEndpoint    string
+	ClipAddr                 string
+	QdrantAddr               string
+	ClipDim                  int
+	AssetDir                 string
+	AssetBackend             string
+	AssetBucket              string
+	AssetRegion              string
+	AssetEndpoint            string
+	AssetAccessKey           string
+	AssetSecretKey           string
+	AssetSessionKey          string
+	AssetPrefix              string
+	AssetPublicBase          string
+	AssetPathStyle           bool
+	OtelEnabled              bool
+	OtelEndpoint             string
+	SSRFAllowPrivateNetworks bool
 }
 
 type Server struct {
@@ -266,6 +268,10 @@ func loadShared() Shared {
 		OtelEndpoint: getEnv(
 			"OTEL_ENDPOINT",
 			defaultOtelEndpoint,
+		),
+		SSRFAllowPrivateNetworks: getEnvBool(
+			"SSRF_ALLOW_PRIVATE_NETWORKS",
+			defaultSSRFAllowPrivateNets,
 		),
 	}
 }

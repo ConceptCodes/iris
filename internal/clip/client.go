@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"iris/internal/constants"
+	"iris/internal/ssrf"
 	"iris/internal/tracing"
 	"iris/pkg/models"
 
@@ -86,6 +87,11 @@ func (c *Client) EmbedImageBytes(ctx context.Context, imageBytes []byte) (models
 }
 
 func (c *Client) EmbedImageURL(ctx context.Context, imageURL string) (models.Embedding, error) {
+	validator := ssrf.NewValidator()
+	if err := validator.ValidateURL(ctx, imageURL); err != nil {
+		return nil, fmt.Errorf("SSRF blocked: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
