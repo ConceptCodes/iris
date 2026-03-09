@@ -118,13 +118,13 @@ function toggleTheme() {
   if (theme === "dark") {
     html.classList.add("dark");
     localStorage.setItem("theme", "dark");
-    document.getElementById("theme-icon-sun").classList.add("hidden");
-    document.getElementById("theme-icon-moon").classList.remove("hidden");
+    document.getElementById("theme-icon-sun")?.classList.remove("hidden");
+    document.getElementById("theme-icon-moon")?.classList.add("hidden");
   } else {
     html.classList.remove("dark");
     localStorage.setItem("theme", "light");
-    document.getElementById("theme-icon-moon").classList.add("hidden");
-    document.getElementById("theme-icon-sun").classList.remove("hidden");
+    document.getElementById("theme-icon-moon")?.classList.remove("hidden");
+    document.getElementById("theme-icon-sun")?.classList.add("hidden");
   }
 }
 
@@ -134,18 +134,21 @@ document.addEventListener("DOMContentLoaded", function () {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   const theme = savedTheme || (prefersDark ? "dark" : "light");
 
+  const html = document.documentElement;
   if (theme === "dark") {
-    document.documentElement.classList.add("dark");
-    if (document.getElementById("theme-icon-sun")) {
-      document.getElementById("theme-icon-sun").classList.add("hidden");
-      document.getElementById("theme-icon-moon").classList.remove("hidden");
-    }
+    html.classList.add("dark");
+    document.getElementById("theme-icon-sun")?.classList.remove("hidden");
+    document.getElementById("theme-icon-moon")?.classList.add("hidden");
   } else {
-    document.documentElement.classList.remove("dark");
-    if (document.getElementById("theme-icon-moon")) {
-      document.getElementById("theme-icon-moon").classList.add("hidden");
-      document.getElementById("theme-icon-sun").classList.remove("hidden");
-    }
+    html.classList.remove("dark");
+    document.getElementById("theme-icon-moon")?.classList.remove("hidden");
+    document.getElementById("theme-icon-sun")?.classList.add("hidden");
+  }
+
+  // Theme Toggle listener
+  const themeToggle = document.getElementById("theme-toggle");
+  if (themeToggle) {
+    themeToggle.addEventListener("click", toggleTheme);
   }
 
   // Event Listeners for Upload Modal

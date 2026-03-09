@@ -56,7 +56,7 @@ func ResultsGrid(results []models.SearchResult, query string, page int) templ.Co
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" hx-trigger=\"revealed\" hx-target=\"#results-grid\" hx-swap=\"beforeend\" class=\"col-span-full py-8 text-center text-gray-400 dark:text-gray-300\">Loading more...</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" hx-trigger=\"revealed\" hx-target=\"#results-grid\" hx-swap=\"beforeend\" class=\"py-8 text-center text-gray-400 dark:text-gray-300 w-full\" style=\"column-span: all;\">Loading more...</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

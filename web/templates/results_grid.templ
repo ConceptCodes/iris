@@ -14,7 +14,8 @@ templ ResultsGrid(results []models.SearchResult, query string, page int) {
 				hx-trigger="revealed"
 				hx-target="#results-grid"
 				hx-swap="beforeend"
-				class="col-span-full py-8 text-center text-gray-400 dark:text-gray-300"
+				class="py-8 text-center text-gray-400 dark:text-gray-300 w-full"
+				style="column-span: all;"
 			>
 				Loading more...
 			</div>
