@@ -49,11 +49,12 @@ const (
 // securityHeaders adds browser security headers to all responses
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Note: script-src allows cdn.tailwindcss.com and unpkg.com for HTMX
+		// Note: script-src allows cdn.tailwindcss.com and unpkg.com for HTMX.
+		// Inline script is currently used for Tailwind config and theme bootstrapping.
 		// In production, these should be self-hosted with SRI
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' https://cdn.tailwindcss.com https://unpkg.com; "+
+				"script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; "+
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: https:; "+
 				"font-src 'self'; "+
