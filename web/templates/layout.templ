@@ -12,6 +12,23 @@ templ Layout(title string, query string) {
 			<title>Iris Search</title>
 		}
 		<script src="https://cdn.tailwindcss.com"></script>
+		<script>
+			tailwind.config = {
+				darkMode: 'class',
+				theme: {
+					extend: {
+						colors: {
+							iris: {
+								blue: '#4285f4',
+								red: '#ea4335',
+								yellow: '#fbbc05',
+								green: '#34a853'
+							}
+						}
+					}
+				}
+			}
+		</script>
 		<script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLTsWvqWVOTitdfv795e96nWt2Ww9GzBH" crossorigin="anonymous"></script>
 		<link rel="stylesheet" href="/static/app.css"/>
 	</head>
