@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultClipAddr             = "http://localhost:8001"
+	defaultClipAddr             = "localhost:8001"
 	defaultQdrantAddr           = "localhost:6334"
 	defaultClipDim              = 512
 	defaultHTTPAddr             = ":8080"

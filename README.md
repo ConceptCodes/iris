@@ -5,7 +5,7 @@
 - **Text-to-Image Search**: Find images using natural language queries.
 - **Reverse Image Search**: Find visually similar images via upload or URL.
 - **Smart Indexing**: Crawl remote URLs, domains, sitemaps, or local directories.
-- **High Performance**: Powered by a Python CLIP sidecar and Qdrant vector database.
+- **High Performance**: Powered by a Python CLIP gRPC service and Qdrant vector database.
 
 ## Architecture
 
@@ -21,7 +21,7 @@
         │                  cmd/server                  │
         └──────────────┬───────────────────┬───────────┘
                        │                   │
-                    HTTP                gRPC
+                    gRPC                gRPC
                        │                   │
              ┌─────────▼───────┐   ┌───────▼─────────┐
              │  Python CLIP    │   │    Qdrant       │
@@ -56,10 +56,29 @@ Visit [http://localhost:8080](http://localhost:8080) to use the UI.
 | :--- | :--- | :--- |
 | `server` | 8080 | Main API and Web UI |
 | `qdrant` | 6333 | Vector Database |
-| `clip` | 8001 | CLIP Embedding Service |
+| `clip` | 8001 | CLIP Embedding gRPC Service |
 | `postgres` | 5432 | Worker Job Store |
 | `grafana` | 3000 | Observability Dashboard |
 
+## CLIP Transport
+
+The Go services talk to `clip_service` over gRPC on `CLIP_ADDR`.
+
+- Default local address: `localhost:8001`
+- Docker Compose address: `clip:8001`
+- Health checks use the standard gRPC health service for `clip.v1.ClipService`
+- The protobuf contract lives at `proto/clip/v1/clip.proto`
+
+If you change the protobuf contract, regenerate stubs with:
+
+```bash
+just proto
+```
+
+This updates:
+
+- Go stubs in `internal/clip/clipv1`
+- Python stubs in `clip_service/clip/v1`
 
 ## Scaling Notes
 
@@ -73,5 +92,6 @@ Visit [http://localhost:8080](http://localhost:8080) to use the UI.
 - `cmd/`: Entry points for server, indexer, and worker.
 - `internal/`: Core logic (API, crawl, indexing, search).
 - `web/`: Frontend templates and assets.
-- `clip_service/`: Python CLIP sidecar.
+- `proto/`: Shared protobuf contracts.
+- `clip_service/`: Python CLIP gRPC service.
 - `infra/`: Docker and environment configuration.

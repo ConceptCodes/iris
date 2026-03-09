@@ -9,6 +9,10 @@ build:
   go build -o bin/indexer ./cmd/indexer
   go build -o bin/worker ./cmd/worker
 
+proto:
+  protoc --proto_path=proto --go_out=. --go_opt=module=iris --go-grpc_out=. --go-grpc_opt=module=iris proto/clip/v1/clip.proto
+  PYTHONPATH=./.tmp-grpc-tools python3 -m grpc_tools.protoc --proto_path=proto --python_out=clip_service --grpc_python_out=clip_service proto/clip/v1/clip.proto
+
 test:
   go test ./...
 

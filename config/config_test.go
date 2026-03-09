@@ -86,7 +86,7 @@ func TestLoadServerReadOnlyAdminKeys(t *testing.T) {
 }
 
 func TestLoadIndexerOverrides(t *testing.T) {
-	t.Setenv("CLIP_ADDR", "http://clip:9000")
+	t.Setenv("CLIP_ADDR", "clip:9000")
 	t.Setenv("QDRANT_ADDR", "qdrant:7334")
 	t.Setenv("CLIP_DIM", "768")
 	t.Setenv("CONCURRENCY", "12")
@@ -101,7 +101,7 @@ func TestLoadIndexerOverrides(t *testing.T) {
 
 	cfg := LoadIndexer()
 
-	if cfg.ClipAddr != "http://clip:9000" {
+	if cfg.ClipAddr != "clip:9000" {
 		t.Fatalf("unexpected clip addr: %q", cfg.ClipAddr)
 	}
 	if cfg.QdrantAddr != "qdrant:7334" {

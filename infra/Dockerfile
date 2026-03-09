@@ -46,15 +46,10 @@ ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 WORKDIR /app
 
 # Install dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+COPY clip_service/requirements.txt /app/clip_service/requirements.txt
 
 RUN pip install --no-cache-dir \
-    fastapi>=0.109.0 \
-    uvicorn[standard]>=0.27.0 \
-    open-clip-torch>=2.24.0 \
-    pillow>=10.2.0 && \
+    -r clip_service/requirements.txt && \
     pip install --no-cache-dir torch --index-url ${TORCH_INDEX}
 
 # Pre-download model weights at build time (speeds up container start)
@@ -63,6 +58,7 @@ RUN python -c "from open_clip import create_model_from_pretrained, get_tokenizer
     t = get_tokenizer('hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K')"
 
 COPY clip_service/main.py .
+COPY clip_service/clip /app/clip
 
 # Environment variables
 ENV MODEL=CLIP-ViT-B-32-laion2B-s34B-b79K
@@ -71,6 +67,6 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8001
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8001/health || exit 1
+    CMD python -c "import grpc; from grpc_health.v1 import health_pb2, health_pb2_grpc; channel = grpc.insecure_channel('localhost:8001'); response = health_pb2_grpc.HealthStub(channel).Check(health_pb2.HealthCheckRequest(service='clip.v1.ClipService')); raise SystemExit(0 if response.status == health_pb2.HealthCheckResponse.SERVING else 1)" || exit 1
 
 ENTRYPOINT ["sh", "-c", "python main.py --model $MODEL --host 0.0.0.0 --port 8001"]

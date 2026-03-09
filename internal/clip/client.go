@@ -3,12 +3,12 @@ package clip
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
+	clipv1 "iris/internal/clip/clipv1"
 	"iris/internal/constants"
 	"iris/internal/ssrf"
 	"iris/internal/tracing"
@@ -16,35 +16,58 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
+)
+
+const (
+	serviceName         = "clip.v1.ClipService"
+	maxGRPCMessageBytes = constants.MaxImageSize + (1 << 20)
 )
 
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
-}
-
-func NewClient(baseURL string) *Client {
-	return &Client{
-		baseURL: baseURL,
-		httpClient: &http.Client{
-			Timeout: constants.HTTPTimeout30s,
-		},
-	}
+	target  string
+	conn    *grpc.ClientConn
+	service clipv1.ClipServiceClient
+	health  grpc_health_v1.HealthClient
 }
 
 var tracer = otel.Tracer("iris/clip")
 
-type embedTextRequest struct {
-	Text string `json:"text"`
+func NewClient(target string) (*Client, error) {
+	normalized, err := normalizeTarget(target)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := grpc.NewClient(
+		normalized,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxGRPCMessageBytes),
+			grpc.MaxCallSendMsgSize(maxGRPCMessageBytes),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create grpc client: %w", err)
+	}
+
+	return &Client{
+		target:  normalized,
+		conn:    conn,
+		service: clipv1.NewClipServiceClient(conn),
+		health:  grpc_health_v1.NewHealthClient(conn),
+	}, nil
 }
 
-type embedImageRequest struct {
-	ImageB64 string `json:"image_b64"`
-}
-
-type embedResponse struct {
-	Embedding []float32 `json:"embedding"`
-	Dim       int       `json:"dim"`
+func (c *Client) Close() error {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	return c.conn.Close()
 }
 
 func (c *Client) EmbedText(ctx context.Context, text string) (models.Embedding, error) {
@@ -55,11 +78,11 @@ func (c *Client) EmbedText(ctx context.Context, text string) (models.Embedding, 
 	)
 	defer span.End()
 
-	reqBody := embedTextRequest{Text: text}
-	var resp embedResponse
-	if err := c.doPost(ctx, constants.PathEmbedText, reqBody, &resp); err != nil {
+	resp, err := c.service.EmbedText(ctx, &clipv1.EmbedTextRequest{Text: text})
+	if err != nil {
+		err = wrapRPCError("embed text", err)
 		tracing.AddErrorToSpan(span, err)
-		return nil, fmt.Errorf("embed text: %w", err)
+		return nil, err
 	}
 	return resp.Embedding, nil
 }
@@ -77,11 +100,12 @@ func (c *Client) EmbedImageBytes(ctx context.Context, imageBytes []byte) (models
 		tracing.AddErrorToSpan(span, err)
 		return nil, err
 	}
-	reqBody := embedImageRequest{ImageB64: base64.StdEncoding.EncodeToString(imageBytes)}
-	var resp embedResponse
-	if err := c.doPost(ctx, constants.PathEmbedImage, reqBody, &resp); err != nil {
+
+	resp, err := c.service.EmbedImage(ctx, &clipv1.EmbedImageRequest{ImageBytes: imageBytes})
+	if err != nil {
+		err = wrapRPCError("embed image", err)
 		tracing.AddErrorToSpan(span, err)
-		return nil, fmt.Errorf("embed image: %w", err)
+		return nil, err
 	}
 	return resp.Embedding, nil
 }
@@ -98,7 +122,6 @@ func (c *Client) EmbedImageURL(ctx context.Context, imageURL string) (models.Emb
 	}
 
 	safeClient := validator.NewSafeClient(constants.HTTPTimeout30s)
-
 	resp, err := safeClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch image url: %w", err)
@@ -107,6 +130,7 @@ func (c *Client) EmbedImageURL(ctx context.Context, imageURL string) (models.Emb
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetch image url: status %d", resp.StatusCode)
 	}
+
 	limited := io.LimitReader(resp.Body, constants.MaxImageSize+1)
 	var buf bytes.Buffer
 	n, err := buf.ReadFrom(limited)
@@ -116,51 +140,39 @@ func (c *Client) EmbedImageURL(ctx context.Context, imageURL string) (models.Emb
 	if n > constants.MaxImageSize {
 		return nil, fmt.Errorf("image exceeds %d bytes limit", constants.MaxImageSize)
 	}
+
 	return c.EmbedImageBytes(ctx, buf.Bytes())
 }
 
-func (c *Client) doPost(ctx context.Context, path string, reqBody, respBody any) error {
-	bodyBytes, err := json.Marshal(reqBody)
+func (c *Client) HealthCheck(ctx context.Context) error {
+	resp, err := c.health.Check(ctx, &grpc_health_v1.HealthCheckRequest{Service: serviceName})
 	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+		return wrapRPCError("health check", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set(constants.HeaderContentType, constants.MIMETypeJSON)
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("do request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		var errResp struct {
-			Detail string `json:"detail"`
-		}
-		if json.NewDecoder(resp.Body).Decode(&errResp) == nil && errResp.Detail != "" {
-			return fmt.Errorf("sidecar error (status %d): %s", resp.StatusCode, errResp.Detail)
-		}
-		return fmt.Errorf("sidecar error: status %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(respBody); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+	if resp.GetStatus() != grpc_health_v1.HealthCheckResponse_SERVING {
+		return fmt.Errorf("health check failed: status %s", resp.GetStatus().String())
 	}
 	return nil
 }
 
-func (c *Client) HealthCheck(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+constants.PathHealth, nil)
-	if err != nil {
-		return err
+func normalizeTarget(target string) (string, error) {
+	trimmed := strings.TrimSpace(target)
+	trimmed = strings.TrimPrefix(trimmed, "http://")
+	trimmed = strings.TrimPrefix(trimmed, "https://")
+	trimmed = strings.TrimSuffix(trimmed, "/")
+	if trimmed == "" {
+		return "", fmt.Errorf("clip target is required")
 	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
+	return trimmed, nil
+}
+
+func wrapRPCError(operation string, err error) error {
+	st, ok := status.FromError(err)
+	if !ok {
+		return fmt.Errorf("%s: %w", operation, err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("health check failed: status %d", resp.StatusCode)
+	if st.Code() == codes.OK {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("%s: %s", operation, st.Message())
 }

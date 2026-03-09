@@ -49,7 +49,12 @@ func main() {
 
 	slog.Info("starting indexer", "mode", *mode, "input", *input, "concurrency", cfg.Concurrency, "asset_dir", cfg.AssetDir)
 
-	clipClient := clip.NewClient(cfg.ClipAddr)
+	clipClient, err := clip.NewClient(cfg.ClipAddr)
+	if err != nil {
+		slog.Error("failed to create clip client", "error", err)
+		os.Exit(1)
+	}
+	defer clipClient.Close()
 	qdrantStore, err := store.NewQdrantStore(cfg.QdrantAddr, cfg.ClipDim, 15*time.Second)
 	if err != nil {
 		slog.Error("failed to connect to qdrant", "error", err)

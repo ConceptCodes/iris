@@ -199,7 +199,11 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	}
 	defer crawlStore.Close()
 
-	clipClient := clip.NewClient(cfg.ClipAddr)
+	clipClient, err := clip.NewClient(cfg.ClipAddr)
+	if err != nil {
+		return fmt.Errorf("create clip client: %w", err)
+	}
+	defer clipClient.Close()
 	qdrantStore, err := store.NewQdrantStore(cfg.QdrantAddr, cfg.ClipDim, 15*time.Second)
 	if err != nil {
 		return err

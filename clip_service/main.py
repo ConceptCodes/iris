@@ -1,26 +1,23 @@
 import argparse
-import base64
 import logging
-from contextlib import asynccontextmanager
+from concurrent import futures
 from io import BytesIO
 
+import grpc
 import torch
-import uvicorn
-from fastapi import FastAPI, HTTPException
+from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from open_clip import create_model_from_pretrained, get_tokenizer
 from PIL import Image
-from pydantic import BaseModel
 
-MAX_IMAGE_PIXELS = 100_000_000  # 100 megapixels
+from clip.v1 import clip_pb2, clip_pb2_grpc
+
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_PIXELS = 100_000_000
+MAX_GRPC_MESSAGE_BYTES = MAX_IMAGE_BYTES + 1024 * 1024
+SERVICE_NAME = "clip.v1.ClipService"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-model = None
-tokenizer = None
-preprocess = None
-device = None
-device_name = None
 
 
 def get_device():
@@ -31,89 +28,78 @@ def get_device():
     return "cpu", "cpu"
 
 
-class TextRequest(BaseModel):
-    text: str
+class ClipService(clip_pb2_grpc.ClipServiceServicer):
+    def __init__(self, model_name: str):
+        self.device, self.device_name = get_device()
+        logger.info("using device: %s", self.device_name)
+        logger.info("loading model: %s", model_name)
+        self.model, self.preprocess = create_model_from_pretrained(f"hf-hub:laion/{model_name}")
+        self.model = self.model.to(self.device)
+        self.model.eval()
+        self.tokenizer = get_tokenizer(f"hf-hub:laion/{model_name}")
+        logger.info("model loaded successfully")
 
+    def EmbedText(self, request, context):
+        with torch.no_grad():
+            text_tokens = self.tokenizer([request.text])
+            text_features = self.model.encode_text(text_tokens.to(self.device))
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            embedding = text_features[0].cpu().tolist()
+        return clip_pb2.EmbedResponse(embedding=embedding, dim=len(embedding))
 
-class ImageRequest(BaseModel):
-    image_b64: str
+    def EmbedImage(self, request, context):
+        image_bytes = request.image_bytes
+        if len(image_bytes) > MAX_IMAGE_BYTES:
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "image size exceeds 20 MB limit")
 
+        try:
+            image = Image.open(BytesIO(image_bytes))
+            image.load()
+        except Exception as exc:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"invalid image: {exc}")
 
-class EmbedResponse(BaseModel):
-    embedding: list[float]
-    dim: int
-
-
-class HealthResponse(BaseModel):
-    status: str
-    device: str
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global model, tokenizer, preprocess, device, device_name
-    device, device_name = get_device()
-    logger.info(f"Using device: {device_name}")
-    model_name = app.state.model_name
-    logger.info(f"Loading model: {model_name}")
-    model, preprocess = create_model_from_pretrained(f"hf-hub:laion/{model_name}")
-    model = model.to(device)
-    model.eval()
-    tokenizer = get_tokenizer(f"hf-hub:laion/{model_name}")
-    logger.info("Model loaded successfully")
-    yield
-
-
-app = FastAPI(lifespan=lifespan)
-
-
-@app.get("/health", response_model=HealthResponse)
-def health():
-    return HealthResponse(status="ok", device=device_name)
-
-
-@app.post("/embed/text", response_model=EmbedResponse)
-def embed_text(req: TextRequest):
-    with torch.no_grad():
-        text_tokens = tokenizer([req.text])
-        text_features = model.encode_text(text_tokens.to(device))
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-        embedding = text_features[0].cpu().tolist()
-    return EmbedResponse(embedding=embedding, dim=len(embedding))
-
-
-@app.post("/embed/image", response_model=EmbedResponse)
-def embed_image(req: ImageRequest):
-    try:
-        image_bytes = base64.b64decode(req.image_b64)
-        if len(image_bytes) > 20 * 1024 * 1024:  # 20 MB limit
-            raise HTTPException(status_code=413, detail="Image size exceeds 20 MB limit")
-        image = Image.open(BytesIO(image_bytes))
-
-        # Check pixel dimensions to prevent decompression bombs
         width, height = image.size
         pixel_count = width * height
         if pixel_count > MAX_IMAGE_PIXELS:
-            raise HTTPException(
-                status_code=413,
-                detail=(
-                    f"Image dimensions ({width}x{height}={pixel_count:,} pixels) exceed maximum allowed "
+            context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                (
+                    f"image dimensions ({width}x{height}={pixel_count:,} pixels) exceed maximum allowed "
                     f"({MAX_IMAGE_PIXELS:,} pixels)"
                 ),
             )
 
         image = image.convert("RGB")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"invalid image: {e}")
 
-    with torch.no_grad():
-        image_tensor = preprocess(image).unsqueeze(0).to(device)
-        image_features = model.encode_image(image_tensor)
-        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        embedding = image_features[0].cpu().tolist()
-    return EmbedResponse(embedding=embedding, dim=len(embedding))
+        with torch.no_grad():
+            image_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
+            image_features = self.model.encode_image(image_tensor)
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+            embedding = image_features[0].cpu().tolist()
+        return clip_pb2.EmbedResponse(embedding=embedding, dim=len(embedding))
+
+
+def serve(model_name: str, host: str, port: int):
+    service = ClipService(model_name)
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=4),
+        options=[
+            ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+            ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+        ],
+    )
+    clip_pb2_grpc.add_ClipServiceServicer_to_server(service, server)
+
+    health_servicer = health.HealthServicer()
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+    health_servicer.set(SERVICE_NAME, health_pb2.HealthCheckResponse.SERVING)
+
+    listen_addr = f"{host}:{port}"
+    server.add_insecure_port(listen_addr)
+    logger.info("starting gRPC server on %s", listen_addr)
+    server.start()
+    server.wait_for_termination()
 
 
 if __name__ == "__main__":
@@ -122,5 +108,4 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args()
-    app.state.model_name = args.model
-    uvicorn.run(app, host=args.host, port=args.port)
+    serve(args.model, args.host, args.port)

@@ -41,7 +41,13 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import grpc; from grpc_health.v1 import health_pb2, health_pb2_grpc; channel = grpc.insecure_channel('localhost:8001'); response = health_pb2_grpc.HealthStub(channel).Check(health_pb2.HealthCheckRequest(service='clip.v1.ClipService')); raise SystemExit(0 if response.status == health_pb2.HealthCheckResponse.SERVING else 1)",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10

@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package clip.v1;
+
+option go_package = "iris/internal/clip/clipv1;clipv1";
+
+service ClipService {
+  rpc EmbedText(EmbedTextRequest) returns (EmbedResponse);
+  rpc EmbedImage(EmbedImageRequest) returns (EmbedResponse);
+}
+
+message EmbedTextRequest {
+  string text = 1;
+}
+
+message EmbedImageRequest {
+  bytes image_bytes = 1;
+}
+
+message EmbedResponse {
+  repeated float embedding = 1;
+  int32 dim = 2;
+}
