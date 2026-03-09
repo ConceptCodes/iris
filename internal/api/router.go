@@ -163,6 +163,9 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 		r.Handle(constants.PathAssets+"/*", http.StripPrefix(constants.PathAssets+"/", http.FileServer(http.Dir(assetDir))))
 	}
 
+	// Serve static UI assets (CSS, JS)
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+
 	return r
 }
 
