@@ -12,8 +12,6 @@ templ ImageCard(result models.SearchResult, index int) {
 		hx-get={ "/image/" + result.Record.ID }
 		hx-target="#detail-panel"
 		hx-swap="innerHTML"
-		onclick="openPanel(this)"
-		onkeydown="if(event.key==='Enter')openPanel(this)"
 	>
 		<img
 			src={ result.Record.URL }

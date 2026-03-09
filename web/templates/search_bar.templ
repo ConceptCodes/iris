@@ -19,7 +19,6 @@ templ SearchBar(query string, variant string) {
 				id="clear-btn"
 				type="button"
 				class="hidden mr-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
-				onclick="document.getElementById('search-input').value=''; this.style.display='none';"
 			>
 				<svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -27,9 +26,9 @@ templ SearchBar(query string, variant string) {
 			</button>
 			<div class="w-px h-6 bg-gray-300 dark:bg-gray-600 mr-3"></div>
 			<button
+				id="open-upload-modal-btn"
 				type="button"
 				class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
-				onclick="openUploadModal()"
 			>
 				<svg class="w-6 h-6 text-[#4285f4]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>

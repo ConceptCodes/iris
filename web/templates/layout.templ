@@ -12,12 +12,12 @@ templ Layout(title string, query string) {
 			<title>Iris Search</title>
 		}
 		<script src="https://cdn.tailwindcss.com"></script>
-		<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+		<script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLTsWvqWVOTitdfv795e96nWt2Ww9GzBH" crossorigin="anonymous"></script>
 		<link rel="stylesheet" href="/static/app.css"/>
 	</head>
 	<body class="bg-white dark:bg-gray-900 min-h-screen transition-colors">
 		<div id="upload-modal" class="fixed inset-0 z-50 hidden">
-			<div class="absolute inset-0 bg-black bg-opacity-40" onclick="closeUploadModal()"></div>
+			<div id="upload-modal-overlay" class="absolute inset-0 bg-black bg-opacity-40"></div>
 			<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-[560px] max-w-[95vw]">
 				@UploadModal()
 			</div>

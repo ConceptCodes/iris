@@ -6,7 +6,7 @@ import "fmt"
 templ DetailPanel(result models.SearchResult) {
 	<div class="p-4">
 		<div class="flex justify-between items-start mb-4">
-			<button onclick="closePanel()" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full">
+			<button id="close-panel-btn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full">
 				<svg class="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
 				</svg>
