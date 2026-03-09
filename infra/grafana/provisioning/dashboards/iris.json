@@ -92,8 +92,8 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum(rate(iris_http_requests_total{job=\"iris\"}[5m])) by (endpoint)",
-          "legendFormat": "{{endpoint}}",
+          "expr": "sum(rate(iris_search_requests_total[5m])) by (type)",
+          "legendFormat": "{{type}}",
           "refId": "A"
         }
       ],
@@ -181,8 +181,8 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum(rate(iris_http_requests_total{job=\"iris\",status=~\"5..\"}[5m])) by (endpoint) / sum(rate(iris_http_requests_total{job=\"iris\"}[5m])) by (endpoint)",
-          "legendFormat": "{{endpoint}}",
+          "expr": "sum(rate(iris_search_errors_total[5m])) by (type) / clamp_min(sum(rate(iris_search_requests_total[5m])) by (type), 1e-9)",
+          "legendFormat": "{{type}}",
           "refId": "A"
         }
       ],
@@ -251,8 +251,8 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum(iris_crawl_active_jobs{job=\"iris\"})",
-          "legendFormat": "Active Crawls",
+          "expr": "sum(increase(iris_crawl_runs_queued_total[5m]))",
+          "legendFormat": "Queued Runs (5m)",
           "refId": "A"
         }
       ],
@@ -793,7 +793,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "increase(iris_crawl_jobs_total{job=\"iris\",status=\"discovered\"}[5m])",
+          "expr": "increase(iris_crawl_jobs_discovered_total[5m])",
           "legendFormat": "Discovered",
           "refId": "A"
         }
@@ -874,7 +874,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "increase(iris_crawl_jobs_total{job=\"iris\",status=\"indexed\"}[5m])",
+          "expr": "increase(iris_crawl_jobs_indexed_total[5m])",
           "legendFormat": "Indexed",
           "refId": "A"
         }
@@ -963,7 +963,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "increase(iris_crawl_jobs_total{job=\"iris\",status=\"failed\"}[5m])",
+          "expr": "increase(iris_crawl_jobs_failed_total[5m])",
           "legendFormat": "Failed",
           "refId": "A"
         }
@@ -1044,8 +1044,8 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum(rate(iris_worker_jobs_processed_total{job=\"iris\"}[5m])) by (worker)",
-          "legendFormat": "{{worker}}",
+          "expr": "sum(rate(iris_worker_jobs_succeeded_total[5m])) + sum(rate(iris_worker_jobs_failed_total[5m]))",
+          "legendFormat": "worker",
           "refId": "A"
         }
       ],
@@ -1133,12 +1133,153 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "sum(rate(iris_worker_jobs_processed_total{job=\"iris\",status=\"succeeded\"}[5m])) by (worker) / sum(rate(iris_worker_jobs_processed_total{job=\"iris\"}[5m])) by (worker)",
-          "legendFormat": "{{worker}}",
+          "expr": "sum(rate(iris_worker_jobs_succeeded_total[5m])) / clamp_min(sum(rate(iris_worker_jobs_succeeded_total[5m])) + sum(rate(iris_worker_jobs_failed_total[5m])), 1e-9)",
+          "legendFormat": "worker",
           "refId": "A"
         }
       ],
       "title": "Job Success Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 40
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "increase(iris_dedupe_events_total[15m])",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "increase(iris_crawl_jobs_duplicate_total[15m])",
+          "legendFormat": "crawl_duplicates",
+          "refId": "B"
+        }
+      ],
+      "title": "Dedupe Activity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 40
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "increase(iris_crawl_skips_total[15m])",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "increase(iris_crawl_budget_hits_total[15m])",
+          "legendFormat": "budget_{{budget}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Crawl Policy Events",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 40
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "increase(iris_scheduler_decisions_total[15m])",
+          "legendFormat": "{{decision}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.5, sum(rate(iris_scheduler_next_run_seconds_bucket[15m])) by (le, decision))",
+          "legendFormat": "p50 {{decision}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Adaptive Scheduling",
       "type": "timeseries"
     }
   ],
