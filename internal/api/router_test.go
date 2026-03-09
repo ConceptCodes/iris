@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,7 +9,49 @@ import (
 
 	"iris/internal/crawl"
 	"iris/internal/jobs"
+	"iris/internal/search"
+	"iris/pkg/models"
 )
+
+type mockSearchEngine struct{}
+
+func (m *mockSearchEngine) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
+	return "", nil
+}
+
+func (m *mockSearchEngine) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	return "", nil
+}
+
+func (m *mockSearchEngine) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	return "", nil
+}
+
+func (m *mockSearchEngine) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
+	return nil, nil
+}
+
+func (m *mockSearchEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
+	return nil, nil
+}
+
+func (m *mockSearchEngine) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error) {
+	return nil, nil
+}
+
+func (m *mockSearchEngine) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
+	return nil, nil
+}
+
+func (m *mockSearchEngine) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (m *mockSearchEngine) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
+	return nil, nil
+}
+
+var _ search.Engine = (*mockSearchEngine)(nil)
 
 func TestRouterHealth(t *testing.T) {
 	router := NewRouterWithAssets(nil, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)

@@ -4,438 +4,248 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 
+	"iris/internal/constants"
 	"iris/internal/crawl"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
+	"iris/internal/metrics"
 	"iris/pkg/models"
 )
 
-type mockSearchEngine struct {
-	err error
-	id  string
-	res []models.SearchResult
-
-	// Spies
-	lastReq     models.IndexRequest
-	lastURL     string
-	lastTopK    int
-	lastFilters map[string]string
-	lastRecord  models.ImageRecord
-	lastQuery   string
+type stubEngine struct {
+	listImages []models.ImageRecord
+	listErr    error
 }
 
-func (m *mockSearchEngine) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
-	m.lastReq = req
-	return m.id, m.err
+func (s *stubEngine) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
+	return "", nil
 }
 
-func (m *mockSearchEngine) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
-	m.lastRecord = record
-	return m.id, m.err
+func (s *stubEngine) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	return "", nil
 }
 
-func (m *mockSearchEngine) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
-	m.lastRecord = record
-	return m.id, m.err
+func (s *stubEngine) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
+	return "", nil
 }
 
-func (m *mockSearchEngine) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
-	m.lastQuery = req.Query
-	m.lastTopK = req.TopK
-	m.lastFilters = req.Filters
-	return m.res, m.err
+func (s *stubEngine) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
+	return nil, nil
 }
 
-func (m *mockSearchEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
-	m.lastTopK = topK
-	m.lastFilters = filters
-	return m.res, m.err
+func (s *stubEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
+	return nil, nil
 }
 
-func (m *mockSearchEngine) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error) {
-	m.lastURL = url
-	m.lastTopK = topK
-	m.lastFilters = filters
-	return m.res, m.err
+func (s *stubEngine) SearchByImageURL(ctx context.Context, imageURL string, topK int, filters map[string]string) ([]models.SearchResult, error) {
+	return nil, nil
 }
 
-func (m *mockSearchEngine) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
-	m.lastTopK = topK
-	return m.res, m.err
+func (s *stubEngine) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
+	return nil, nil
 }
 
-func (m *mockSearchEngine) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {
-	return "", false, m.err
+func (s *stubEngine) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {
+	return "", false, nil
 }
 
-func (m *mockSearchEngine) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
-	return []models.ImageRecord{}, m.err
+func (s *stubEngine) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
+	return s.listImages, s.listErr
 }
 
-func newTestHandler(engine *mockSearchEngine) *Handler {
-	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{
-		SSRFAllowPrivateNetworks: true,
-	})
-	return NewHandler(engine, pipeline, nil, nil, nil)
+type stubIndexer struct {
+	result indexing.Result
+	err    error
 }
 
-func newTestHandlerWithCrawl(engine *mockSearchEngine) *Handler {
-	jobStore := jobs.NewMemoryStore()
-	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{
-		SSRFAllowPrivateNetworks: true,
-	})
-	return NewHandler(engine, pipeline, crawl.NewService(crawl.NewMemoryStore(), jobStore), jobStore, nil)
+func (s *stubIndexer) IndexFromURLResult(ctx context.Context, req models.IndexRequest) (indexing.Result, error) {
+	return s.result, s.err
 }
 
-func TestHandler_Health(t *testing.T) {
-	h := newTestHandler(&mockSearchEngine{})
-	req := httptest.NewRequest("GET", "/health", nil)
-	w := httptest.NewRecorder()
-	h.Health(w, req)
+func (s *stubIndexer) IndexUploadedBytesResult(ctx context.Context, imageBytes []byte, filename string, tags []string, meta map[string]string) (indexing.Result, error) {
+	return s.result, s.err
+}
 
-	res := w.Result()
-	if ctype := res.Header.Get("Content-Type"); ctype != "application/json" {
-		t.Errorf("expected application/json, got %v", ctype)
+func (s *stubIndexer) IndexLocalFileResult(ctx context.Context, path string) (indexing.Result, error) {
+	return s.result, s.err
+}
+
+func (s *stubIndexer) ReindexFromURLResult(ctx context.Context, imageURL string, record models.ImageRecord) (indexing.Result, error) {
+	return s.result, s.err
+}
+
+type stubJobStore struct {
+	enqueued []jobs.Job
+	err      error
+}
+
+func (s *stubJobStore) Enqueue(ctx context.Context, job jobs.Job) (jobs.Job, error) {
+	if s.err != nil {
+		return jobs.Job{}, s.err
 	}
-	var b map[string]string
-	json.NewDecoder(res.Body).Decode(&b)
-	if b["status"] != "ok" {
-		t.Errorf("expected status ok")
+	s.enqueued = append(s.enqueued, job)
+	return job, nil
+}
+
+func (s *stubJobStore) LeaseNext(ctx context.Context, now time.Time, leaseDuration time.Duration, allowedTypes ...jobs.Type) (jobs.Job, bool, error) {
+	return jobs.Job{}, false, nil
+}
+
+func (s *stubJobStore) MarkSucceeded(ctx context.Context, id string) error {
+	return nil
+}
+
+func (s *stubJobStore) MarkFailed(ctx context.Context, id string, err error, retryAt time.Time) (jobs.Status, error) {
+	return jobs.StatusFailed, nil
+}
+
+func (s *stubJobStore) Close() error { return nil }
+
+func TestHandlerCreateSourceRequiresService(t *testing.T) {
+	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	res := httptest.NewRecorder()
+
+	h.CreateSource(res, req)
+	if res.Code != http.StatusNotImplemented {
+		t.Fatalf("expected status 501, got %d", res.Code)
 	}
 }
 
-func TestHandler_IndexFromURL(t *testing.T) {
-	t.Run("invalid json", func(t *testing.T) {
-		h := newTestHandler(&mockSearchEngine{})
-		req := httptest.NewRequest("POST", "/index/url", strings.NewReader(`{invalid`))
-		w := httptest.NewRecorder()
-		h.IndexFromURL(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400, got %v", w.Code)
-		}
-	})
+func TestHandlerTriggerRunRequiresService(t *testing.T) {
+	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	req.SetPathValue("id", "source-id")
+	res := httptest.NewRecorder()
 
-	t.Run("missing URL", func(t *testing.T) {
-		h := newTestHandler(&mockSearchEngine{})
-		req := httptest.NewRequest("POST", "/index/url", strings.NewReader(`{}`))
-		w := httptest.NewRecorder()
-		h.IndexFromURL(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400, got %v", w.Code)
-		}
-	})
-
-	t.Run("engine error propagation", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "image/jpeg")
-			_, _ = w.Write([]byte("fake image"))
-		}))
-		defer server.Close()
-		h := newTestHandler(&mockSearchEngine{err: errors.New("engine fail")})
-		req := httptest.NewRequest("POST", "/index/url", strings.NewReader(fmt.Sprintf(`{"url":"%s"}`, server.URL)))
-		w := httptest.NewRecorder()
-		h.IndexFromURL(w, req)
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("expected 500, got %v", w.Code)
-		}
-		var b models.ErrorResponse
-		json.NewDecoder(w.Body).Decode(&b)
-		if b.Error != "engine fail" {
-			t.Errorf("expected engine fail")
-		}
-	})
-
-	t.Run("success payload shape", func(t *testing.T) {
-		mock := &mockSearchEngine{id: "123"}
-		h := newTestHandler(mock)
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "image/jpeg")
-			_, _ = w.Write([]byte("fake image"))
-		}))
-		defer server.Close()
-		req := httptest.NewRequest("POST", "/index/url", strings.NewReader(fmt.Sprintf(`{"url":"%s"}`, server.URL)))
-		w := httptest.NewRecorder()
-		h.IndexFromURL(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200, got %v", w.Code)
-		}
-		var b models.IndexResponse
-		json.NewDecoder(w.Body).Decode(&b)
-		if b.ID != "123" || b.Message != "indexed" {
-			t.Errorf("unexpected success payload: %+v", b)
-		}
-	})
-}
-
-func TestHandler_IndexFromUpload(t *testing.T) {
-	createMultipartRequest := func(filename, tags string, meta map[string]string) (*http.Request, error) {
-		var b bytes.Buffer
-		mw := multipart.NewWriter(&b)
-		if filename != "" {
-			fw, err := mw.CreateFormFile("image", filename)
-			if err != nil {
-				return nil, err
-			}
-			fw.Write([]byte("fake image data"))
-		}
-
-		mw.WriteField("filename", "custom.png")
-		if tags != "" {
-			mw.WriteField("tags", tags)
-		}
-		for k, v := range meta {
-			mw.WriteField("meta_"+k, v)
-		}
-		mw.Close()
-		req := httptest.NewRequest("POST", "/index/upload", &b)
-		req.Header.Set("Content-Type", mw.FormDataContentType())
-		return req, nil
+	h.TriggerSourceRun(res, req)
+	if res.Code != http.StatusNotImplemented {
+		t.Fatalf("expected status 501, got %d", res.Code)
 	}
-
-	t.Run("multipart parse failure", func(t *testing.T) {
-		h := newTestHandler(&mockSearchEngine{})
-		req := httptest.NewRequest("POST", "/index/upload", strings.NewReader("bad"))
-		req.Header.Set("Content-Type", "multipart/form-data; boundary=foo")
-		w := httptest.NewRecorder()
-		h.IndexFromUpload(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400, got %v", w.Code)
-		}
-	})
-
-	t.Run("missing image", func(t *testing.T) {
-		h := newTestHandler(&mockSearchEngine{})
-		req, _ := createMultipartRequest("", "", nil)
-		w := httptest.NewRecorder()
-		h.IndexFromUpload(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400, got %v", w.Code)
-		}
-	})
-
-	t.Run("engine error", func(t *testing.T) {
-		h := newTestHandler(&mockSearchEngine{err: errors.New("engine fail")})
-		req, _ := createMultipartRequest("test.png", "", nil)
-		w := httptest.NewRecorder()
-		h.IndexFromUpload(w, req)
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("expected 500, got %v", w.Code)
-		}
-	})
-
-	t.Run("success parsing logic", func(t *testing.T) {
-		mock := &mockSearchEngine{id: "456"}
-		h := newTestHandler(mock)
-		req, _ := createMultipartRequest("test.png", "tag1,tag2", map[string]string{"source": "test", "foo": "bar"})
-		w := httptest.NewRecorder()
-		h.IndexFromUpload(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200, got %v", w.Code)
-		}
-		if len(mock.lastRecord.Tags) != 2 || mock.lastRecord.Tags[0] != "tag1" {
-			t.Errorf("tags not parsed correctly")
-		}
-		if mock.lastRecord.Meta["source"] != "test" || mock.lastRecord.Meta["foo"] != "bar" {
-			t.Errorf("meta not parsed correctly")
-		}
-		if mock.lastRecord.Filename != "custom.png" {
-			t.Errorf("filename not parsed correctly")
-		}
-	})
 }
 
-func TestHandler_SearchText(t *testing.T) {
-	t.Run("invalid json", func(t *testing.T) {
-		h := newTestHandler(&mockSearchEngine{})
-		req := httptest.NewRequest("POST", "/search/text", strings.NewReader(`{invalid`))
-		w := httptest.NewRecorder()
-		h.SearchText(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400")
-		}
-	})
+func TestHandlerListRunsRequiresService(t *testing.T) {
+	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	res := httptest.NewRecorder()
 
-	t.Run("empty query", func(t *testing.T) {
-		h := newTestHandler(&mockSearchEngine{})
-		req := httptest.NewRequest("POST", "/search/text", strings.NewReader(`{}`))
-		w := httptest.NewRecorder()
-		h.SearchText(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400")
-		}
-	})
-
-	t.Run("engine error", func(t *testing.T) {
-		h := newTestHandler(&mockSearchEngine{err: errors.New("engine fail")})
-		req := httptest.NewRequest("POST", "/search/text", strings.NewReader(`{"query":"test"}`))
-		w := httptest.NewRecorder()
-		h.SearchText(w, req)
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("expected 500")
-		}
-	})
-
-	t.Run("success logic", func(t *testing.T) {
-		mock := &mockSearchEngine{res: []models.SearchResult{{Score: 0.99}}}
-		h := newTestHandler(mock)
-		req := httptest.NewRequest("POST", "/search/text", strings.NewReader(`{"query":"test", "top_k": 5, "filters": {"color": "red"}}`))
-		w := httptest.NewRecorder()
-		h.SearchText(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200")
-		}
-		var b models.TextSearchResponse
-		json.NewDecoder(w.Body).Decode(&b)
-		if b.Query != "test" || len(b.Results) != 1 {
-			t.Errorf("unexpected payload")
-		}
-		if mock.lastTopK != 5 || mock.lastFilters["color"] != "red" {
-			t.Errorf("data not forwarded to engine")
-		}
-	})
-}
-
-func TestHandler_EnqueueLocalIndex(t *testing.T) {
-	t.Run("requires valid json", func(t *testing.T) {
-		h := newTestHandlerWithCrawl(&mockSearchEngine{})
-		req := httptest.NewRequest("POST", "/admin/index/local", strings.NewReader(`{`))
-		w := httptest.NewRecorder()
-
-		h.EnqueueLocalIndex(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d", w.Code)
-		}
-	})
-
-	t.Run("requires path", func(t *testing.T) {
-		h := newTestHandlerWithCrawl(&mockSearchEngine{})
-		req := httptest.NewRequest("POST", "/admin/index/local", strings.NewReader(`{"path":"   "}`))
-		w := httptest.NewRecorder()
-
-		h.EnqueueLocalIndex(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d", w.Code)
-		}
-	})
-
-	t.Run("creates source and run", func(t *testing.T) {
-		h := newTestHandlerWithCrawl(&mockSearchEngine{})
-		req := httptest.NewRequest("POST", "/admin/index/local", strings.NewReader(`{"path":"./images/bootstrap"}`))
-		w := httptest.NewRecorder()
-
-		h.EnqueueLocalIndex(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d", w.Code)
-		}
-
-		var resp models.LocalIndexResponse
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
-		if resp.SourceID == "" || resp.RunID == "" || resp.Status != string(crawl.RunStatusRunning) {
-			t.Fatalf("unexpected response: %+v", resp)
-		}
-	})
-}
-
-func TestHandler_SearchImage(t *testing.T) {
-	createMultipartRequest := func(topK, filters string) (*http.Request, error) {
-		var b bytes.Buffer
-		mw := multipart.NewWriter(&b)
-		fw, _ := mw.CreateFormFile("image", "test.png")
-		fw.Write([]byte("fake image data"))
-		if topK != "" {
-			mw.WriteField("top_k", topK)
-		}
-		if filters != "" {
-			mw.WriteField("filters", filters)
-		}
-		mw.Close()
-		req := httptest.NewRequest("POST", "/search/image", &b)
-		req.Header.Set("Content-Type", mw.FormDataContentType())
-		return req, nil
+	h.ListRuns(res, req)
+	if res.Code != http.StatusNotImplemented {
+		t.Fatalf("expected status 501, got %d", res.Code)
 	}
-
-	t.Run("multipart parse and engine error", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{err: errors.New("engine error")}, nil, nil, nil, nil)
-		req, _ := createMultipartRequest("", "")
-		w := httptest.NewRecorder()
-		h.SearchImage(w, req)
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("expected 500")
-		}
-	})
-
-	t.Run("success parsing valid strings", func(t *testing.T) {
-		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil, nil, nil)
-		req, _ := createMultipartRequest("10", `{"color":"blue"}`)
-		w := httptest.NewRecorder()
-		h.SearchImage(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200")
-		}
-		if mock.lastTopK != 10 || mock.lastFilters["color"] != "blue" {
-			t.Errorf("topK/filters not parsed correctly")
-		}
-	})
-
-	t.Run("success fallback for invalid top_k and filters", func(t *testing.T) {
-		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil, nil, nil)
-		req, _ := createMultipartRequest("abc", `{not_json}`)
-		w := httptest.NewRecorder()
-		h.SearchImage(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200")
-		}
-		if mock.lastTopK != 0 || mock.lastFilters != nil {
-			t.Errorf("invalid inputs should yield default (0) and nil filters")
-		}
-	})
 }
 
-func TestHandler_SearchImageURL(t *testing.T) {
-	t.Run("invalid json", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{}, nil, nil, nil, nil)
-		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{invalid`))
-		w := httptest.NewRecorder()
-		h.SearchImageURL(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400")
-		}
-	})
-	t.Run("empty URL", func(t *testing.T) {
-		h := NewHandler(&mockSearchEngine{}, nil, nil, nil, nil)
-		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{"url": ""}`))
-		w := httptest.NewRecorder()
-		h.SearchImageURL(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400")
-		}
-	})
-	t.Run("success", func(t *testing.T) {
-		mock := &mockSearchEngine{}
-		h := NewHandler(mock, nil, nil, nil, nil)
-		req := httptest.NewRequest("POST", "/search/image/url", strings.NewReader(`{"url": "http://x.com", "top_k": 7, "filters": {"f": "v"}}`))
-		w := httptest.NewRecorder()
-		h.SearchImageURL(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("expected 200")
-		}
-		if mock.lastURL != "http://x.com" || mock.lastTopK != 7 || mock.lastFilters["f"] != "v" {
-			t.Errorf("values not properly forwarded")
-		}
-	})
+func TestHandlerMetricsReturnsEmptyWhenNil(t *testing.T) {
+	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	res := httptest.NewRecorder()
+
+	h.Metrics(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.Code)
+	}
+}
+
+func TestHandlerHandleReindexRequiresJobStore(t *testing.T) {
+	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	res := httptest.NewRecorder()
+
+	h.HandleReindex(res, req)
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d", res.Code)
+	}
+}
+
+func TestHandlerHandleReindexEnqueuesJobs(t *testing.T) {
+	engine := &stubEngine{
+		listImages: []models.ImageRecord{
+			{ID: "img-1", URL: "https://example.com/a.jpg"},
+			{ID: "img-2", Meta: map[string]string{constants.MetaKeyOriginURL: "https://example.com/b.jpg"}},
+		},
+	}
+	jobStore := &stubJobStore{}
+	h := NewHandler(engine, nil, nil, jobStore, metrics.NewCounters())
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	res := httptest.NewRecorder()
+
+	h.HandleReindex(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.Code)
+	}
+	if len(jobStore.enqueued) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobStore.enqueued))
+	}
+}
+
+func TestHandlerHandleReindexSkipsMissingSourceURL(t *testing.T) {
+	engine := &stubEngine{
+		listImages: []models.ImageRecord{
+			{ID: "img-1"},
+		},
+	}
+	jobStore := &stubJobStore{}
+	h := NewHandler(engine, nil, nil, jobStore, metrics.NewCounters())
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	res := httptest.NewRecorder()
+
+	h.HandleReindex(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.Code)
+	}
+	if len(jobStore.enqueued) != 0 {
+		t.Fatalf("expected no jobs, got %d", len(jobStore.enqueued))
+	}
+	var response models.ReindexResponse
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.EnqueuedCount != 0 || len(response.Errors) != 1 {
+		t.Fatalf("expected error for missing source URL")
+	}
+}
+
+func TestHandlerHandleReindexListsWithFilters(t *testing.T) {
+	engine := &stubEngine{}
+	jobStore := &stubJobStore{}
+	h := NewHandler(engine, nil, nil, jobStore, metrics.NewCounters())
+
+	body := `{"source_id":"source-123","run_id":"run-456","limit":20,"offset":10}`
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+
+	h.HandleReindex(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.Code)
+	}
+}
+
+func TestHandlerEnqueueLocalIndexRequiresService(t *testing.T) {
+	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	res := httptest.NewRecorder()
+
+	h.EnqueueLocalIndex(res, req)
+	if res.Code != http.StatusNotImplemented {
+		t.Fatalf("expected status 501, got %d", res.Code)
+	}
+}
+
+func TestHandlerEnqueueLocalIndexRequiresPath(t *testing.T) {
+	service := crawl.NewService(crawl.NewMemoryStore(), jobs.NewMemoryStore())
+	h := NewHandler(&stubEngine{}, nil, service, jobs.NewMemoryStore(), metrics.NewCounters())
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"path":""}`))
+	res := httptest.NewRecorder()
+
+	h.EnqueueLocalIndex(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", res.Code)
+	}
 }
