@@ -11,6 +11,8 @@ from open_clip import create_model_from_pretrained, get_tokenizer
 from PIL import Image
 from pydantic import BaseModel
 
+MAX_IMAGE_PIXELS = 100_000_000  # 100 megapixels
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -86,7 +88,23 @@ def embed_image(req: ImageRequest):
         image_bytes = base64.b64decode(req.image_b64)
         if len(image_bytes) > 20 * 1024 * 1024:  # 20 MB limit
             raise HTTPException(status_code=413, detail="Image size exceeds 20 MB limit")
-        image = Image.open(BytesIO(image_bytes)).convert("RGB")
+        image = Image.open(BytesIO(image_bytes))
+
+        # Check pixel dimensions to prevent decompression bombs
+        width, height = image.size
+        pixel_count = width * height
+        if pixel_count > MAX_IMAGE_PIXELS:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Image dimensions ({width}x{height}={pixel_count:,} pixels) exceed maximum allowed "
+                    f"({MAX_IMAGE_PIXELS:,} pixels)"
+                ),
+            )
+
+        image = image.convert("RGB")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid image: {e}")
 

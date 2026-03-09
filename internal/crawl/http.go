@@ -14,6 +14,8 @@ import (
 	"iris/internal/constants"
 )
 
+const maxFetchSize = 10 * 1024 * 1024 // 10 MB limit for HTML/sitemap content
+
 type CachedFetcher struct {
 	client          *http.Client
 	userAgent       string
@@ -157,9 +159,13 @@ func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cac
 	now := time.Now().UTC()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		body, err := io.ReadAll(resp.Body)
+		limited := io.LimitReader(resp.Body, maxFetchSize+1)
+		body, err := io.ReadAll(limited)
 		if err != nil {
 			return FetchResult{}, false, 0, err
+		}
+		if len(body) > maxFetchSize {
+			return FetchResult{}, false, 0, fmt.Errorf("response body exceeds %d bytes limit", maxFetchSize)
 		}
 		resource := cachedResource{
 			body:         append([]byte(nil), body...),
