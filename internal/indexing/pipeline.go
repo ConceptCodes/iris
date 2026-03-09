@@ -214,6 +214,16 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 			return Result{ID: existing, Status: ResultStatusDuplicate}, nil
 		}
 	}
+	if p.assetStore != nil {
+		assetURL, err := p.assetStore.Save(record.ID, record.Filename, imageBytes)
+		if err != nil {
+			return Result{}, fmt.Errorf("store image asset: %w", err)
+		}
+		record.URL = assetURL
+		if record.Meta[constants.MetaKeySourceURL] == "" {
+			record.Meta[constants.MetaKeySourceURL] = assetURL
+		}
+	}
 	var id string
 	var err error
 	if force {
@@ -225,16 +235,6 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 		id, err = p.engine.IndexFromBytes(ctx, imageBytes, record)
 		if err != nil {
 			return Result{}, err
-		}
-	}
-	if p.assetStore != nil {
-		assetURL, err := p.assetStore.Save(record.ID, record.Filename, imageBytes)
-		if err != nil {
-			return Result{ID: id, Status: ResultStatusIndexed}, fmt.Errorf("store image asset: %w (vector record created without asset URL)", err)
-		}
-		record.URL = assetURL
-		if record.Meta[constants.MetaKeySourceURL] == "" {
-			record.Meta[constants.MetaKeySourceURL] = assetURL
 		}
 	}
 	if force {
