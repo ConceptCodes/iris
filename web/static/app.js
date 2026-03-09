@@ -111,17 +111,17 @@ document.body.addEventListener("htmx:beforeSwap", function (evt) {
 });
 // Theme toggle functionality
 function toggleTheme() {
-  const body = document.body;
-  const isDark = body.classList.contains("dark");
+  const html = document.documentElement;
+  const isDark = html.classList.contains("dark");
   const theme = isDark ? "light" : "dark";
 
   if (theme === "dark") {
-    body.classList.add("dark");
+    html.classList.add("dark");
     localStorage.setItem("theme", "dark");
     document.getElementById("theme-icon-sun").classList.add("hidden");
     document.getElementById("theme-icon-moon").classList.remove("hidden");
   } else {
-    body.classList.remove("dark");
+    html.classList.remove("dark");
     localStorage.setItem("theme", "light");
     document.getElementById("theme-icon-moon").classList.add("hidden");
     document.getElementById("theme-icon-sun").classList.remove("hidden");
@@ -135,12 +135,13 @@ document.addEventListener("DOMContentLoaded", function () {
   const theme = savedTheme || (prefersDark ? "dark" : "light");
 
   if (theme === "dark") {
-    document.body.classList.add("dark");
+    document.documentElement.classList.add("dark");
     if (document.getElementById("theme-icon-sun")) {
       document.getElementById("theme-icon-sun").classList.add("hidden");
       document.getElementById("theme-icon-moon").classList.remove("hidden");
     }
   } else {
+    document.documentElement.classList.remove("dark");
     if (document.getElementById("theme-icon-moon")) {
       document.getElementById("theme-icon-moon").classList.add("hidden");
       document.getElementById("theme-icon-sun").classList.remove("hidden");

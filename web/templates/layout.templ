@@ -28,6 +28,12 @@ templ Layout(title string, query string) {
 					}
 				}
 			}
+			// Initialize theme immediately to prevent flashing
+			if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+				document.documentElement.classList.add('dark');
+			} else {
+				document.documentElement.classList.remove('dark');
+			}
 		</script>
 		<script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLTsWvqWVOTitdfv795e96nWt2Ww9GzBH" crossorigin="anonymous"></script>
 		<link rel="stylesheet" href="/static/app.css"/>
