@@ -25,6 +25,7 @@ type CachedFetcher struct {
 	backoff         time.Duration
 	hostConcurrency int
 	store           CacheStore
+	ssrfValidator   *ssrf.Validator
 
 	mu          sync.Mutex
 	cache       map[string]cachedResource
@@ -49,6 +50,11 @@ type FetcherOptions struct {
 	RetryBackoff    time.Duration
 	HostConcurrency int
 	Store           CacheStore
+	// SSRFValidator is an optional SSRF validator for URL validation.
+	// If nil, a default secure validator is created for each fetch.
+	// Tests can inject a validator with WithAllowPrivateNetworks(true)
+	// to allow httptest.Server loopback addresses.
+	SSRFValidator *ssrf.Validator
 }
 
 func NewCachedFetcher(client *http.Client, userAgent string, options FetcherOptions) *CachedFetcher {
@@ -78,6 +84,7 @@ func NewCachedFetcher(client *http.Client, userAgent string, options FetcherOpti
 		backoff:         options.RetryBackoff,
 		hostConcurrency: options.HostConcurrency,
 		store:           options.Store,
+		ssrfValidator:   options.SSRFValidator,
 		cache:           make(map[string]cachedResource),
 		hostLimiter:     map[string]chan struct{}{},
 	}
@@ -137,7 +144,10 @@ func (f *CachedFetcher) Fetch(ctx context.Context, rawURL string) (FetchResult, 
 }
 
 func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cached cachedResource, hasCached bool) (FetchResult, bool, time.Duration, error) {
-	validator := ssrf.NewValidator()
+	validator := f.ssrfValidator
+	if validator == nil {
+		validator = ssrf.NewValidator()
+	}
 	if err := validator.ValidateURL(ctx, normalizedURL); err != nil {
 		return FetchResult{}, false, 0, fmt.Errorf("SSRF blocked: %w", err)
 	}

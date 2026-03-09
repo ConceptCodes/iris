@@ -3,6 +3,7 @@ package crawl
 import (
 	"context"
 	"fmt"
+	"iris/internal/ssrf"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,14 @@ import (
 	"testing"
 	"time"
 )
+
+func testFetcherOptions() FetcherOptions {
+	return FetcherOptions{
+		DefaultTTL:      time.Second,
+		HostConcurrency: 2,
+		SSRFValidator:   ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(true)),
+	}
+}
 
 type memoryCacheStore struct {
 	resource cachedResource
@@ -65,10 +74,7 @@ func TestCachedFetcherUsesConditionalRequests(t *testing.T) {
 	}))
 	defer server.Close()
 
-	fetcher := NewCachedFetcher(server.Client(), "iris", FetcherOptions{
-		DefaultTTL:      time.Second,
-		HostConcurrency: 2,
-	})
+	fetcher := NewCachedFetcher(server.Client(), "iris", testFetcherOptions())
 
 	first, err := fetcher.Fetch(context.Background(), server.URL+"/page?utm_source=test")
 	if err != nil {
@@ -103,6 +109,7 @@ func TestCachedFetcherRetriesTransientStatus(t *testing.T) {
 		Retries:         1,
 		RetryBackoff:    time.Millisecond,
 		HostConcurrency: 2,
+		SSRFValidator:   ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(true)),
 	})
 
 	result, err := fetcher.Fetch(context.Background(), server.URL+"/retry")
@@ -129,6 +136,7 @@ func TestCachedFetcherHydratesFromPersistentStore(t *testing.T) {
 		DefaultTTL:      time.Second,
 		HostConcurrency: 1,
 		Store:           store,
+		SSRFValidator:   ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(true)),
 	})
 
 	result, err := fetcher.Fetch(context.Background(), "https://example.com/page")
@@ -163,6 +171,7 @@ func TestCachedFetcherLimitsHostConcurrency(t *testing.T) {
 	fetcher := NewCachedFetcher(server.Client(), "iris", FetcherOptions{
 		DefaultTTL:      time.Millisecond,
 		HostConcurrency: 1,
+		SSRFValidator:   ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(true)),
 	})
 
 	u, err := url.Parse(server.URL)

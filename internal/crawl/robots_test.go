@@ -2,10 +2,12 @@ package crawl
 
 import (
 	"context"
+	"iris/internal/ssrf"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseRobotsLongestMatchWins(t *testing.T) {
@@ -94,7 +96,11 @@ func TestRobotsClientAllowed(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewRobotsClient(server.Client(), "iris")
+	client := NewRobotsClientWithOptions(server.Client(), "iris", FetcherOptions{
+		DefaultTTL:      time.Second,
+		HostConcurrency: 2,
+		SSRFValidator:   ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(true)),
+	})
 
 	allowed, err := client.Allowed(context.Background(), server.URL+"/open/image.jpg")
 	if err != nil {
