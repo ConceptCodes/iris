@@ -1,8 +1,20 @@
-# Small public demo corpus for bootstrapping the index.
+# Public demo corpus for bootstrapping the index.
 # These Wikimedia redirect URLs resolve to stable raw image assets.
+# Keep this set varied so text queries have multiple semantic clusters to match.
 https://commons.wikimedia.org/wiki/Special:Redirect/file/Cat03.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Cat_(Kitten).jpg
 https://commons.wikimedia.org/wiki/Special:Redirect/file/Golde33443.jpg
-https://commons.wikimedia.org/wiki/Special:Redirect/file/The_Earth_seen_from_Apollo_17.jpg
-https://commons.wikimedia.org/wiki/Special:Redirect/file/Fronalpstock_big.jpg
-https://commons.wikimedia.org/wiki/Special:Redirect/file/Palace_of_Westminster,_London_-_Feb_2007.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Lion_(cc).jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Britannica_Tiger.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Bald_Eagle_Portrait.jpg
 https://commons.wikimedia.org/wiki/Special:Redirect/file/Albert_Einstein_Head.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Barack_Obama.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Palace_of_Westminster,_London_-_Feb_2007.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Taj-Mahal.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Golden_Gate_Bridge_0002.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Fronalpstock_big.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/The_Earth_seen_from_Apollo_17.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Space_Shuttle_Columbia_launching.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Pizza_on_stone.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Red_Apple.jpg
+https://commons.wikimedia.org/wiki/Special:Redirect/file/Pink_rose.jpg
