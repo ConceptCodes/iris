@@ -176,6 +176,35 @@ func TestMemoryStoreMarkFailedErrorsForUnknownJob(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreMarkFailedClearsLeaseAndReschedulesPendingJob(t *testing.T) {
+	store := NewMemoryStore()
+	job, err := store.Enqueue(context.Background(), Job{
+		Type:        TypeFetchImage,
+		MaxAttempts: 3,
+	})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	leased, ok, err := store.LeaseNext(context.Background(), time.Now(), 30*time.Second, TypeFetchImage)
+	if err != nil || !ok {
+		t.Fatalf("lease: ok=%v err=%v", ok, err)
+	}
+	retryAt := time.Now().Add(5 * time.Minute).UTC()
+	status, err := store.MarkFailed(context.Background(), leased.ID, assertErr("boom"), retryAt)
+	if err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	if status != StatusPending {
+		t.Fatalf("expected pending status after retryable failure, got %s", status)
+	}
+	if got := store.jobs[0]; !got.LeasedUntil.IsZero() || !got.AvailableAt.Equal(retryAt) || got.LastError != "boom" {
+		t.Fatalf("expected lease cleared and retry scheduled, got %+v", got)
+	}
+	if store.jobs[0].ID != job.ID {
+		t.Fatalf("expected same job to be updated")
+	}
+}
+
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }

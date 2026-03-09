@@ -77,15 +77,7 @@ func main() {
 		ReadOnlyAPIKeys: cfg.AdminReadOnlyAPIKeys,
 	}, jobStore)
 
-	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           router,
-		ReadTimeout:       constants.HTTPTimeout30s,
-		WriteTimeout:      constants.HTTPTimeout60s,
-		IdleTimeout:       constants.HTTPTimeout120s,
-		ReadHeaderTimeout: 10 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1MB
-	}
+	srv := newHTTPServer(cfg.HTTPAddr, router)
 
 	go func() {
 		slog.Info("listening", "addr", cfg.HTTPAddr)
@@ -108,4 +100,16 @@ func main() {
 		slog.Error("shutdown error", "error", err)
 	}
 	slog.Info("server stopped")
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadTimeout:       constants.HTTPTimeout30s,
+		WriteTimeout:      constants.HTTPTimeout60s,
+		IdleTimeout:       constants.HTTPTimeout120s,
+		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB
+	}
 }

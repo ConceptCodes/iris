@@ -47,7 +47,7 @@ func TestS3StorePublicURLDefault(t *testing.T) {
 func TestS3StoreObjectKeyUsesPrefix(t *testing.T) {
 	store := &S3Store{bucket: "bucket", prefix: "prefix"}
 	key := store.objectKey("id-1", "photo.jpg", []byte("image-bytes"))
-	if key != "prefix/id-1.conf" {
+	if key != "prefix/id-1.jpg" {
 		t.Fatalf("unexpected key: %s", key)
 	}
 }

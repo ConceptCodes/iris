@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -208,6 +209,36 @@ func TestRouterAdminReadOnlyRole(t *testing.T) {
 	}
 }
 
+func TestRouterAdminSupportsBearerToken(t *testing.T) {
+	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, AdminAuthSettings{
+		AdminAPIKey: "secret",
+	}, nil)
+
+	req := httptest.NewRequest("GET", "/admin/metrics", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected bearer token to authorize, got %d", res.Code)
+	}
+}
+
+func TestRouterAdminRejectsReadOnlyBearerOnWriteRoute(t *testing.T) {
+	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, AdminAuthSettings{
+		AdminAPIKey:     "secret",
+		ReadOnlyAPIKeys: []string{"viewer"},
+	}, nil)
+
+	req := httptest.NewRequest("POST", "/admin/reindex", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer viewer")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected readonly bearer token to be forbidden on write route, got %d", res.Code)
+	}
+}
+
 func TestRouterAdminDisabledWithoutKey(t *testing.T) {
 	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
 	req := httptest.NewRequest("GET", "/admin/runs", nil)
@@ -225,5 +256,106 @@ func TestRouterAdminMetricsDisabled(t *testing.T) {
 	router.ServeHTTP(w, req)
 	if w.Result().StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestRouterPrometheusMetricsRouteIsAdminProtected(t *testing.T) {
+	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, AdminAuthSettings{
+		AdminAPIKey: "secret",
+	}, nil)
+
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without auth, got %d", unauthorized.Code)
+	}
+
+	authorizedReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	authorizedReq.Header.Set("X-Admin-Key", "secret")
+	authorized := httptest.NewRecorder()
+	router.ServeHTTP(authorized, authorizedReq)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("expected 200 with admin auth, got %d", authorized.Code)
+	}
+}
+
+func TestBuildAssetStoreFallsBackToLocalStoreOnInvalidSettings(t *testing.T) {
+	dir := t.TempDir()
+	store, assetDir := buildAssetStore(AssetsSettings{
+		Backend:  "s3",
+		LocalDir: dir,
+	})
+	if store == nil {
+		t.Fatal("expected fallback local store")
+	}
+	if assetDir != dir {
+		t.Fatalf("expected asset dir %q, got %q", dir, assetDir)
+	}
+}
+
+func TestNewCrawlServiceReturnsMemoryService(t *testing.T) {
+	service, jobStore, cleanup, err := NewCrawlService("memory", "")
+	if err != nil {
+		t.Fatalf("NewCrawlService: %v", err)
+	}
+	if service == nil || jobStore == nil || cleanup == nil {
+		t.Fatalf("expected non-nil service, store, and cleanup")
+	}
+	defer cleanup()
+
+	source, err := service.CreateSource(context.Background(), crawl.CreateSourceInput{
+		Kind:      crawl.SourceKindLocalDir,
+		LocalPath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create source via service: %v", err)
+	}
+	if source.ID == "" {
+		t.Fatal("expected source ID")
+	}
+}
+
+func TestNewCrawlServiceReturnsNilForUnsupportedBackend(t *testing.T) {
+	service, jobStore, cleanup, err := NewCrawlService("unsupported", "")
+	if err != nil {
+		t.Fatalf("expected nil error for unsupported backend, got %v", err)
+	}
+	if service != nil || jobStore != nil || cleanup != nil {
+		t.Fatalf("expected nil return values for unsupported backend")
+	}
+}
+
+func TestNewCrawlServicePostgresFailureReturnsError(t *testing.T) {
+	service, jobStore, cleanup, err := NewCrawlService("postgres", "")
+	if err == nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		t.Fatal("expected error for invalid postgres configuration")
+	}
+	if service != nil || jobStore != nil || cleanup != nil {
+		t.Fatalf("expected nil return values on postgres init failure")
+	}
+}
+
+func TestBuildAssetStoreReturnsUsableLocalStore(t *testing.T) {
+	dir := t.TempDir()
+	store, assetDir := buildAssetStore(AssetsSettings{LocalDir: dir})
+	if assetDir != dir {
+		t.Fatalf("expected local asset dir %q, got %q", dir, assetDir)
+	}
+	url, err := store.Save("asset-1", "photo.jpg", []byte("image-bytes"))
+	if err != nil {
+		t.Fatalf("save asset: %v", err)
+	}
+	if url == "" {
+		t.Fatal("expected non-empty asset URL")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 asset written, got %d", len(entries))
 	}
 }

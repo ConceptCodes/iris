@@ -2,6 +2,7 @@ package indexing
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"iris/internal/assets"
+	"iris/internal/constants"
 	"iris/pkg/models"
 )
 
@@ -17,6 +19,9 @@ type mockEngine struct {
 	id         string
 	findID     string
 	findOK     bool
+	findErr    error
+	indexErr   error
+	reindexErr error
 	lastReq    models.IndexRequest
 	lastRecord *models.ImageRecord
 	lastBytes  []byte
@@ -32,18 +37,30 @@ func (m *mockEngine) IndexFromBytes(ctx context.Context, imageBytes []byte, reco
 	m.lastBytes = append([]byte(nil), imageBytes...)
 	m.lastRecord = &record
 	m.force = false
-	return m.id, nil
+	return m.id, m.indexErr
 }
 
 func (m *mockEngine) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
 	m.lastBytes = append([]byte(nil), imageBytes...)
 	m.lastRecord = &record
 	m.force = true
-	return m.id, nil
+	return m.id, m.reindexErr
 }
 
 func (m *mockEngine) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {
-	return m.findID, m.findOK, nil
+	return m.findID, m.findOK, m.findErr
+}
+
+type failingAssetStore struct {
+	err error
+}
+
+func (s failingAssetStore) Save(id, filename string, data []byte) (string, error) {
+	return "", s.err
+}
+
+func (s failingAssetStore) LocalDir() (string, bool) {
+	return "", false
 }
 
 func TestPipelineIndexFromURL(t *testing.T) {
@@ -77,6 +94,9 @@ func TestPipelineIndexFromURL(t *testing.T) {
 	}
 	if engine.lastRecord.Meta["content_sha256"] == "" {
 		t.Fatalf("expected content_sha256 metadata")
+	}
+	if engine.lastRecord.Meta[constants.MetaKeySourceDomain] != "127.0.0.1" && engine.lastRecord.Meta[constants.MetaKeySourceDomain] != "localhost" {
+		t.Fatalf("expected source_domain metadata to be derived, got %q", engine.lastRecord.Meta[constants.MetaKeySourceDomain])
 	}
 }
 
@@ -192,5 +212,120 @@ func TestPipelineReindexFromURL(t *testing.T) {
 	}
 	if !engine.force {
 		t.Fatalf("expected reindex to force embedding")
+	}
+	if engine.lastRecord.Meta[constants.MetaKeyOriginURL] != server.URL+"/img.png" {
+		t.Fatalf("expected origin_url metadata to be set")
+	}
+	if engine.lastRecord.Meta[constants.MetaKeyMIMEType] != "image/png" {
+		t.Fatalf("expected mime_type metadata to be set")
+	}
+}
+
+func TestPipelineIndexFromURLEmptyURL(t *testing.T) {
+	pipeline := NewPipelineWithOptions(&mockEngine{}, nil, PipelineOptions{})
+	if _, err := pipeline.IndexFromURLResult(context.Background(), models.IndexRequest{}); err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+}
+
+func TestFetchImageBytesRejectsUnsupportedContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>not an image</html>"))
+	}))
+	defer server.Close()
+
+	_, _, err := fetchImageBytes(context.Background(), server.URL, nil, 1024, "test-agent", true)
+	if err == nil || !strings.Contains(err.Error(), "unsupported content type") {
+		t.Fatalf("expected unsupported content type error, got %v", err)
+	}
+}
+
+func TestFetchImageBytesRejectsOversizedResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("123456"))
+	}))
+	defer server.Close()
+
+	_, _, err := fetchImageBytes(context.Background(), server.URL, nil, 5, "test-agent", true)
+	if err == nil || !strings.Contains(err.Error(), "image exceeds 5 bytes limit") {
+		t.Fatalf("expected image size limit error, got %v", err)
+	}
+}
+
+func TestFetchImageBytesUsesContentSniffingWhenContentTypeMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Minimal GIF header so DetectContentType treats it as image/gif.
+		_, _ = w.Write([]byte("GIF89a"))
+	}))
+	defer server.Close()
+
+	_, mimeType, err := fetchImageBytes(context.Background(), server.URL, nil, 1024, "test-agent", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mimeType != "image/gif" {
+		t.Fatalf("expected image/gif, got %q", mimeType)
+	}
+}
+
+func TestPipelinePreservesExistingContentHash(t *testing.T) {
+	engine := &mockEngine{id: "hash-id"}
+	pipeline := NewPipeline(engine, nil)
+
+	existingHash := "already-set"
+	result, err := pipeline.IndexUploadedBytesResult(context.Background(), []byte("image-bytes"), "photo.jpg", nil, map[string]string{
+		constants.MetaKeyContentSHA256: existingHash,
+	})
+	if err != nil {
+		t.Fatalf("index upload: %v", err)
+	}
+	if result.ID != "hash-id" {
+		t.Fatalf("unexpected id: %s", result.ID)
+	}
+	if engine.lastRecord.Meta[constants.MetaKeyContentSHA256] != existingHash {
+		t.Fatalf("expected existing content hash to be preserved")
+	}
+}
+
+func TestPipelineIndexUploadedBytesPropagatesDuplicateLookupError(t *testing.T) {
+	engine := &mockEngine{findErr: errors.New("dedupe failed")}
+	pipeline := NewPipeline(engine, nil)
+
+	_, err := pipeline.IndexUploadedBytesResult(context.Background(), []byte("image-bytes"), "photo.jpg", nil, nil)
+	if err == nil || err.Error() != "dedupe failed" {
+		t.Fatalf("expected dedupe error, got %v", err)
+	}
+}
+
+func TestPipelineIndexUploadedBytesPropagatesAssetStoreFailure(t *testing.T) {
+	engine := &mockEngine{id: "upload-id"}
+	pipeline := NewPipeline(engine, failingAssetStore{err: errors.New("disk full")})
+
+	_, err := pipeline.IndexUploadedBytesResult(context.Background(), []byte("image-bytes"), "photo.jpg", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "store image asset: disk full") {
+		t.Fatalf("expected asset store error, got %v", err)
+	}
+}
+
+func TestPipelineReindexFromURLReturnsReindexedStatus(t *testing.T) {
+	engine := &mockEngine{id: "reindex-id"}
+	pipeline := NewPipelineWithOptions(engine, nil, PipelineOptions{
+		SSRFAllowPrivateNetworks: true,
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("image-bytes"))
+	}))
+	defer server.Close()
+
+	result, err := pipeline.ReindexFromURLResult(context.Background(), server.URL+"/img.jpg", models.ImageRecord{ID: "existing"})
+	if err != nil {
+		t.Fatalf("reindex from url: %v", err)
+	}
+	if result.Status != ResultStatusReindexed {
+		t.Fatalf("expected reindexed status, got %q", result.Status)
 	}
 }

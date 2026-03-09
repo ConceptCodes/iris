@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,8 +19,11 @@ import (
 )
 
 type stubEngine struct {
-	listImages []models.ImageRecord
-	listErr    error
+	listImages  []models.ImageRecord
+	listErr     error
+	lastFilters map[string]string
+	lastLimit   uint32
+	lastOffset  uint32
 }
 
 func (s *stubEngine) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
@@ -55,6 +59,9 @@ func (s *stubEngine) FindExistingID(ctx context.Context, meta map[string]string,
 }
 
 func (s *stubEngine) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
+	s.lastFilters = filters
+	s.lastLimit = limit
+	s.lastOffset = offset
 	return s.listImages, s.listErr
 }
 
@@ -117,6 +124,30 @@ func TestHandlerCreateSourceRequiresService(t *testing.T) {
 	}
 }
 
+func TestHandlerCreateSourceRejectsInvalidJSON(t *testing.T) {
+	service := crawl.NewService(crawl.NewMemoryStore(), jobs.NewMemoryStore())
+	h := NewHandler(&stubEngine{}, nil, service, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{"))
+	res := httptest.NewRecorder()
+
+	h.CreateSource(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", res.Code)
+	}
+}
+
+func TestHandlerCreateSourceRejectsBadSourceDefinition(t *testing.T) {
+	service := crawl.NewService(crawl.NewMemoryStore(), jobs.NewMemoryStore())
+	h := NewHandler(&stubEngine{}, nil, service, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"kind":"domain"}`))
+	res := httptest.NewRecorder()
+
+	h.CreateSource(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", res.Code)
+	}
+}
+
 func TestHandlerTriggerRunRequiresService(t *testing.T) {
 	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
@@ -129,12 +160,55 @@ func TestHandlerTriggerRunRequiresService(t *testing.T) {
 	}
 }
 
+func TestHandlerTriggerRunDefaultsTrigger(t *testing.T) {
+	jobStore := jobs.NewMemoryStore()
+	store := crawl.NewMemoryStore()
+	service := crawl.NewService(store, jobStore)
+	source, err := service.CreateSource(context.Background(), crawl.CreateSourceInput{
+		Kind:      crawl.SourceKindLocalDir,
+		LocalPath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	h := NewHandler(&stubEngine{}, nil, service, jobStore, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{}`))
+	req.SetPathValue("id", source.ID)
+	res := httptest.NewRecorder()
+
+	h.TriggerSourceRun(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.Code)
+	}
+
+	runs, err := service.ListRuns(context.Background())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Trigger != "manual" {
+		t.Fatalf("expected manual trigger, got %+v", runs)
+	}
+}
+
 func TestHandlerListRunsRequiresService(t *testing.T) {
 	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	res := httptest.NewRecorder()
 
 	h.ListRuns(res, req)
+	if res.Code != http.StatusNotImplemented {
+		t.Fatalf("expected status 501, got %d", res.Code)
+	}
+}
+
+func TestHandlerGetRunRequiresService(t *testing.T) {
+	h := NewHandler(&stubEngine{}, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetPathValue("id", "run-id")
+	res := httptest.NewRecorder()
+
+	h.GetRun(res, req)
 	if res.Code != http.StatusNotImplemented {
 		t.Fatalf("expected status 501, got %d", res.Code)
 	}
@@ -159,6 +233,17 @@ func TestHandlerHandleReindexRequiresJobStore(t *testing.T) {
 	h.HandleReindex(res, req)
 	if res.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status 503, got %d", res.Code)
+	}
+}
+
+func TestHandlerHandleReindexRejectsInvalidJSON(t *testing.T) {
+	h := NewHandler(&stubEngine{}, nil, nil, &stubJobStore{}, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{"))
+	res := httptest.NewRecorder()
+
+	h.HandleReindex(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", res.Code)
 	}
 }
 
@@ -224,6 +309,66 @@ func TestHandlerHandleReindexListsWithFilters(t *testing.T) {
 	h.HandleReindex(res, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", res.Code)
+	}
+	if engine.lastFilters[constants.PayloadFieldMetaPrefix+constants.MetaKeySourceID] != "source-123" {
+		t.Fatalf("expected source_id filter to be forwarded, got %v", engine.lastFilters)
+	}
+	if engine.lastFilters[constants.PayloadFieldMetaPrefix+constants.MetaKeyRunID] != "run-456" {
+		t.Fatalf("expected run_id filter to be forwarded, got %v", engine.lastFilters)
+	}
+	if engine.lastLimit != 20 || engine.lastOffset != 10 {
+		t.Fatalf("expected limit=20 offset=10, got limit=%d offset=%d", engine.lastLimit, engine.lastOffset)
+	}
+}
+
+func TestHandlerHandleReindexUsesDefaultPagination(t *testing.T) {
+	engine := &stubEngine{}
+	h := NewHandler(engine, nil, nil, &stubJobStore{}, metrics.NewCounters())
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{}`))
+	res := httptest.NewRecorder()
+
+	h.HandleReindex(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.Code)
+	}
+	if engine.lastLimit != uint32(constants.DefaultLimit100) || engine.lastOffset != 0 {
+		t.Fatalf("expected default limit/offset, got limit=%d offset=%d", engine.lastLimit, engine.lastOffset)
+	}
+}
+
+func TestHandlerHandleReindexListImagesError(t *testing.T) {
+	engine := &stubEngine{listErr: errors.New("list failed")}
+	h := NewHandler(engine, nil, nil, &stubJobStore{}, metrics.NewCounters())
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{}`))
+	res := httptest.NewRecorder()
+
+	h.HandleReindex(res, req)
+	if res.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", res.Code)
+	}
+}
+
+func TestHandlerHandleReindexCollectsEnqueueErrors(t *testing.T) {
+	engine := &stubEngine{
+		listImages: []models.ImageRecord{
+			{ID: "img-1", URL: "https://example.com/a.jpg"},
+		},
+	}
+	jobStore := &stubJobStore{err: errors.New("queue down")}
+	h := NewHandler(engine, nil, nil, jobStore, metrics.NewCounters())
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{}`))
+	res := httptest.NewRecorder()
+
+	h.HandleReindex(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.Code)
+	}
+	var response models.ReindexResponse
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.EnqueuedCount != 0 || len(response.Errors) != 1 {
+		t.Fatalf("expected one enqueue error, got %+v", response)
 	}
 }
 

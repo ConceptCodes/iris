@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"iris/config"
+	"iris/internal/crawl"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
 	"iris/pkg/models"
@@ -423,6 +424,55 @@ type mockPipeline struct {
 func (m *mockPipeline) IndexFromURLResult(ctx context.Context, req models.IndexRequest) (indexing.Result, error) {
 	m.lastRequest = req
 	return m.result, nil
+}
+
+func TestProcessSchedulesAdvancesNextRunAndQueuesRun(t *testing.T) {
+	jobStore := jobs.NewMemoryStore()
+	store := crawl.NewMemoryStore()
+	service := crawl.NewService(store, jobStore)
+
+	source, err := service.CreateSource(context.Background(), crawl.CreateSourceInput{
+		Kind:          crawl.SourceKindDomain,
+		SeedURL:       "https://example.com",
+		ScheduleEvery: "1m",
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	dueAt := time.Now().UTC().Add(-time.Minute)
+	if err := service.SetSourceNextRun(context.Background(), source.ID, dueAt); err != nil {
+		t.Fatalf("set source next run: %v", err)
+	}
+
+	processSchedules(context.Background(), service)
+
+	updatedSource, err := store.GetSource(context.Background(), source.ID)
+	if err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if !updatedSource.NextRunAt.After(time.Now().UTC()) {
+		t.Fatalf("expected next run to be advanced, got %v", updatedSource.NextRunAt)
+	}
+
+	runs, err := service.ListRuns(context.Background())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Trigger != "scheduled" {
+		t.Fatalf("expected one scheduled run, got %+v", runs)
+	}
+
+	job, ok, err := jobStore.LeaseNext(context.Background(), time.Now().UTC().Add(time.Second), time.Second, jobs.TypeDiscoverSource)
+	if err != nil || !ok {
+		t.Fatalf("expected queued discover job, ok=%v err=%v", ok, err)
+	}
+	var payload jobs.DiscoverSourcePayload
+	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.SourceID != source.ID || payload.RunID != runs[0].ID {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
 }
 
 func (m *mockPipeline) IndexLocalFileResult(ctx context.Context, path string) (indexing.Result, error) {

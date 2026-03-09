@@ -2,8 +2,11 @@ package crawl
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"iris/internal/jobs"
 )
 
 func TestMemoryStoreCreateSourceDefaults(t *testing.T) {
@@ -277,5 +280,117 @@ func TestMemoryStoreErrorsForMissingRun(t *testing.T) {
 	}
 	if err := store.MarkRunFailed(context.Background(), "missing", "boom"); err == nil {
 		t.Fatal("expected error for missing run")
+	}
+}
+
+func TestServiceCreateSourceValidation(t *testing.T) {
+	service := NewService(NewMemoryStore(), jobs.NewMemoryStore())
+	tests := []struct {
+		name  string
+		input CreateSourceInput
+	}{
+		{"missing_kind", CreateSourceInput{}},
+		{"domain_missing_seed", CreateSourceInput{Kind: SourceKindDomain}},
+		{"local_dir_missing_path", CreateSourceInput{Kind: SourceKindLocalDir}},
+		{"invalid_schedule", CreateSourceInput{Kind: SourceKindDomain, SeedURL: "https://example.com", ScheduleEvery: "nope"}},
+		{"negative_pages", CreateSourceInput{Kind: SourceKindDomain, SeedURL: "https://example.com", MaxPagesPerRun: -1}},
+		{"negative_images", CreateSourceInput{Kind: SourceKindDomain, SeedURL: "https://example.com", MaxImagesPerRun: -1}},
+		{"unsupported_kind", CreateSourceInput{Kind: SourceKind("wat")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := service.CreateSource(context.Background(), tt.input); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestServiceTriggerRunDefaultsToManual(t *testing.T) {
+	jobStore := jobs.NewMemoryStore()
+	store := NewMemoryStore()
+	service := NewService(store, jobStore)
+	source, err := service.CreateSource(context.Background(), CreateSourceInput{
+		Kind:      SourceKindLocalDir,
+		LocalPath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	run, err := service.TriggerRun(context.Background(), source.ID, "")
+	if err != nil {
+		t.Fatalf("trigger run: %v", err)
+	}
+	if run.Trigger != "manual" {
+		t.Fatalf("expected manual trigger, got %q", run.Trigger)
+	}
+
+	job, ok, err := jobStore.LeaseNext(context.Background(), time.Now().Add(time.Second), time.Second, jobs.TypeDiscoverSource)
+	if err != nil || !ok {
+		t.Fatalf("expected discover source job, ok=%v err=%v", ok, err)
+	}
+	var payload jobs.DiscoverSourcePayload
+	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.SourceID != source.ID || payload.RunID != run.ID {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestServiceTriggerRunForSourceDefaultsToScheduled(t *testing.T) {
+	jobStore := jobs.NewMemoryStore()
+	store := NewMemoryStore()
+	service := NewService(store, jobStore)
+	source, err := service.CreateSource(context.Background(), CreateSourceInput{
+		Kind:      SourceKindLocalDir,
+		LocalPath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	scheduledAt := time.Now().UTC()
+	run, err := service.TriggerRunForSource(context.Background(), source, "", scheduledAt)
+	if err != nil {
+		t.Fatalf("trigger run for source: %v", err)
+	}
+	if run.Trigger != "scheduled" {
+		t.Fatalf("expected scheduled trigger, got %q", run.Trigger)
+	}
+}
+
+func TestServiceListRunsAndGetRun(t *testing.T) {
+	jobStore := jobs.NewMemoryStore()
+	store := NewMemoryStore()
+	service := NewService(store, jobStore)
+	source, err := service.CreateSource(context.Background(), CreateSourceInput{
+		Kind:      SourceKindLocalDir,
+		LocalPath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	run, err := service.TriggerRun(context.Background(), source.ID, "manual")
+	if err != nil {
+		t.Fatalf("trigger run: %v", err)
+	}
+
+	runs, err := service.ListRuns(context.Background())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("unexpected runs: %+v", runs)
+	}
+
+	got, err := service.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.ID != run.ID {
+		t.Fatalf("expected run ID %q, got %q", run.ID, got.ID)
 	}
 }
