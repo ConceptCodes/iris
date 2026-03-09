@@ -82,7 +82,7 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(StructuredLogger())
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(constants.HTTPTimeout60s))
 	r.Use(cors.Handler(cors.Options{
