@@ -4,6 +4,10 @@ global:
 
 scrape_configs:
   - job_name: 'iris-server'
+    metrics_path: /metrics
+    http_headers:
+      X-Admin-Key:
+        values: ['change-me']
     static_configs:
       - targets: ['server:8080']
         labels:
