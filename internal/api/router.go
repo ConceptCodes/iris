@@ -46,6 +46,29 @@ const (
 	adminRoleWrite
 )
 
+// securityHeaders adds browser security headers to all responses
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Note: script-src allows cdn.tailwindcss.com and unpkg.com for HTMX
+		// In production, these should be self-hosted with SRI
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data: https:; "+
+				"font-src 'self'; "+
+				"connect-src 'self'; "+
+				"frame-ancestors 'none'; "+
+				"base-uri 'self'; "+
+				"form-action 'self';")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Service, adminAPIKey string) http.Handler {
 	return NewRouterWithAssets(engine, AssetsSettings{LocalDir: assetDir}, crawlService, adminAPIKey, nil)
 }
@@ -69,6 +92,7 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 		AllowCredentials: true,
 		MaxAge:           constants.CORSMaxAge,
 	}))
+	r.Use(securityHeaders)
 	// Add OpenTelemetry instrumentation
 	r.Use(otelchi.Middleware("iris-server", otelchi.WithChiRoutes(r)))
 
@@ -90,6 +114,8 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 		r.With(authorizer.requireRole(adminRoleRead)).Get(constants.PathAdminRuns, h.ListRuns)
 		r.With(authorizer.requireRole(adminRoleRead)).Get(constants.PathAdminRunDetail, h.GetRun)
 		r.With(authorizer.requireRole(adminRoleRead)).Get(constants.PathAdminMetrics, h.Metrics)
+		// Metrics require admin authentication
+		r.With(authorizer.requireRole(adminRoleRead)).Handle("/metrics", metrics.Handler())
 	} else {
 		r.Post(constants.PathAdminSources, adminDisabled)
 		r.Post(constants.PathAdminSourceRun, adminDisabled)
@@ -98,10 +124,10 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 		r.Get(constants.PathAdminRuns, adminDisabled)
 		r.Get(constants.PathAdminRunDetail, adminDisabled)
 		r.Get(constants.PathAdminMetrics, adminDisabled)
+		r.Handle("/metrics", metrics.Handler())
 	}
 
 	r.Get(constants.PathHealth, h.Health)
-	r.Handle("/metrics", metrics.Handler())
 
 	r.Get(constants.PathLanding, wh.LandingPage)
 	r.Get(constants.PathSearch, wh.SearchResults)

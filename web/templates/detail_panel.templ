@@ -23,6 +23,7 @@ templ DetailPanel(result models.SearchResult) {
 			<a
 				href={ result.Record.URL }
 				target="_blank"
+				rel="noopener noreferrer"
 				class="flex-1 px-4 py-2 border border-[#1a73e8] text-[#1a73e8] text-sm font-medium rounded-full text-center hover:bg-blue-50 transition-colors"
 			>
 				Visit
@@ -30,7 +31,7 @@ templ DetailPanel(result models.SearchResult) {
 			<a
 				href={ result.Record.URL }
 				target="_blank"
-				rel="noopener"
+				rel="noopener noreferrer"
 				class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 dark:text-gray-100 text-sm font-medium rounded-full text-center hover:bg-gray-200 transition-colors"
 			>
 				View full size
