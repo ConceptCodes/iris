@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
+	"time"
 )
 
 // BlockReason identifies why a URL was blocked.
@@ -174,65 +176,8 @@ func (v *Validator) ValidateURL(ctx context.Context, rawURL string) error {
 
 	// Check each resolved IP
 	for _, ipAddr := range ips {
-		ip := ipAddr.IP
-
-		// Check against metadata endpoints
-		for _, metadataIP := range v.metadataEndpoints {
-			if ip.Equal(metadataIP) {
-				return &ValidationError{
-					Reason:  BlockReasonMetadataEndpoint,
-					Message: ErrMetadataEndpoint.Message,
-					IP:      ip,
-					URL:     rawURL,
-				}
-			}
-		}
-
-		// Check against blocked networks
-		for _, network := range v.blockedNetworks {
-			if network.Contains(ip) {
-				var reason BlockReason
-				var message string
-
-				if isLoopback(ip) {
-					if v.allowPrivateNetworks {
-						continue
-					}
-					reason = BlockReasonLoopback
-					message = ErrLoopback.Message
-				} else if isLinkLocal(ip) {
-					if v.allowPrivateNetworks {
-						continue
-					}
-					reason = BlockReasonLinkLocal
-					message = ErrLinkLocal.Message
-				} else if isPrivateNetwork(ip) {
-					if v.allowPrivateNetworks {
-						continue
-					}
-					reason = BlockReasonPrivateNetwork
-					message = ErrPrivateNetwork.Message
-				} else if isMulticast(ip) {
-					reason = BlockReasonMulticast
-					message = ErrMulticast.Message
-				} else if isUnspecified(ip) {
-					if v.allowPrivateNetworks {
-						continue
-					}
-					reason = BlockReasonUnspecified
-					message = ErrUnspecified.Message
-				} else {
-					reason = BlockReasonPrivateNetwork
-					message = "access to this IP range is blocked"
-				}
-
-				return &ValidationError{
-					Reason:  reason,
-					Message: message,
-					IP:      ip,
-					URL:     rawURL,
-				}
-			}
+		if err := v.validateIP(ctx, ipAddr.IP, rawURL); err != nil {
+			return err
 		}
 	}
 
@@ -246,6 +191,141 @@ func (v *Validator) ValidateURL(ctx context.Context, rawURL string) error {
 // before following them.
 func (v *Validator) ValidateRedirect(ctx context.Context, rawURL string) error {
 	return v.ValidateURL(ctx, rawURL)
+}
+
+// HTTPCheckRedirect is a helper intended to be used as a CheckRedirect function
+// in http.Client. It validates the next URL in the redirect chain.
+func (v *Validator) HTTPCheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	// We re-validate the URL string on each hop.
+	// Combined with SafeDialContext, this protects against DNS rebinding and private IPs.
+	return v.ValidateURL(req.Context(), req.URL.String())
+}
+
+// SafeDialContext creates a dialer that validates resolved IP addresses before connection.
+// This is the primary defense against DNS rebinding attacks.
+func (v *Validator) SafeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+		port = ""
+	}
+
+	// Resolve the hostname (this is where we can check resolved IPs)
+	ips, err := v.resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no IP addresses resolved for %s", host)
+	}
+
+	// Check all resolved IPs
+	for _, ipAddr := range ips {
+		if err := v.validateIP(ctx, ipAddr.IP, addr); err != nil {
+			return nil, err
+		}
+	}
+
+	// Create a dialer and select the first safe IP
+	dialer := net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	// We'll use the first resolved (and validated) IP to avoid another DNS lookup during DialContext
+	// which would re-open the DNS rebinding window.
+	dialAddr := addr
+	if len(ips) > 0 {
+		if port != "" {
+			dialAddr = net.JoinHostPort(ips[0].IP.String(), port)
+		} else {
+			dialAddr = ips[0].IP.String()
+		}
+	}
+
+	return dialer.DialContext(ctx, network, dialAddr)
+}
+
+// validateIP is an internal helper that checks a single IP against blocklists.
+func (v *Validator) validateIP(ctx context.Context, ip net.IP, rawURL string) error {
+	// Check against metadata endpoints
+	for _, metadataIP := range v.metadataEndpoints {
+		if ip.Equal(metadataIP) {
+			return &ValidationError{
+				Reason:  BlockReasonMetadataEndpoint,
+				Message: ErrMetadataEndpoint.Message,
+				IP:      ip,
+				URL:     rawURL,
+			}
+		}
+	}
+
+	// Check against blocked networks
+	for _, network := range v.blockedNetworks {
+		if network.Contains(ip) {
+			var reason BlockReason
+			var message string
+
+			if isLoopback(ip) {
+				if v.allowPrivateNetworks {
+					continue
+				}
+				reason = BlockReasonLoopback
+				message = ErrLoopback.Message
+			} else if isLinkLocal(ip) {
+				if v.allowPrivateNetworks {
+					continue
+				}
+				reason = BlockReasonLinkLocal
+				message = ErrLinkLocal.Message
+			} else if isPrivateNetwork(ip) {
+				if v.allowPrivateNetworks {
+					continue
+				}
+				reason = BlockReasonPrivateNetwork
+				message = ErrPrivateNetwork.Message
+			} else if isMulticast(ip) {
+				reason = BlockReasonMulticast
+				message = ErrMulticast.Message
+			} else if isUnspecified(ip) {
+				if v.allowPrivateNetworks {
+					continue
+				}
+				reason = BlockReasonUnspecified
+				message = ErrUnspecified.Message
+			} else {
+				reason = BlockReasonPrivateNetwork
+				message = "access to this IP range is blocked"
+			}
+
+			return &ValidationError{
+				Reason:  reason,
+				Message: message,
+				IP:      ip,
+				URL:     rawURL,
+			}
+		}
+	}
+	return nil
+}
+
+// NewSafeClient returns an http.Client configured with SSRF protection.
+// It uses SafeDialContext to prevent DNS rebinding and HTTPCheckRedirect to block private redirects.
+func (v *Validator) NewSafeClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = v.SafeDialContext
+	// Disable proxy exploitation by ensuring no proxy is used for these sensitive fetches
+	transport.Proxy = nil
+
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     transport,
+		CheckRedirect: v.HTTPCheckRedirect,
+	}
 }
 
 // mustParseCIDR parses a CIDR string and panics if invalid.

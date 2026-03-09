@@ -81,12 +81,18 @@ func (m *mockSearchEngine) ListImages(ctx context.Context, filters map[string]st
 }
 
 func newTestHandler(engine *mockSearchEngine) *Handler {
-	return NewHandler(engine, indexing.NewPipeline(engine, nil), nil, nil, nil)
+	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{
+		SSRFAllowPrivateNetworks: true,
+	})
+	return NewHandler(engine, pipeline, nil, nil, nil)
 }
 
 func newTestHandlerWithCrawl(engine *mockSearchEngine) *Handler {
 	jobStore := jobs.NewMemoryStore()
-	return NewHandler(engine, indexing.NewPipeline(engine, nil), crawl.NewService(crawl.NewMemoryStore(), jobStore), jobStore, nil)
+	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{
+		SSRFAllowPrivateNetworks: true,
+	})
+	return NewHandler(engine, pipeline, crawl.NewService(crawl.NewMemoryStore(), jobStore), jobStore, nil)
 }
 
 func TestHandler_Health(t *testing.T) {

@@ -26,6 +26,7 @@ import (
 	"iris/internal/jobs"
 	"iris/internal/metrics"
 	"iris/internal/search"
+	"iris/internal/ssrf"
 	"iris/internal/store"
 	"iris/internal/tracing"
 	"iris/pkg/models"
@@ -492,6 +493,10 @@ func newCrawlerRuntime(cfg config.Worker) (*crawlerRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	validator := ssrf.NewValidator()
+	safeClient := validator.NewSafeClient(30 * time.Second)
+
 	fetcherOptions := crawl.FetcherOptions{
 		DefaultTTL:      cfg.HTTPCacheTTL,
 		Retries:         cfg.FetchRetries,
@@ -507,8 +512,8 @@ func newCrawlerRuntime(cfg config.Worker) (*crawlerRuntime, error) {
 		Store:           cacheStore,
 	}
 	return &crawlerRuntime{
-		fetcher:    crawl.NewCachedFetcher(http.DefaultClient, "iris", fetcherOptions),
-		robots:     crawl.NewRobotsClientWithOptions(http.DefaultClient, "iris", robotsOptions),
+		fetcher:    crawl.NewCachedFetcher(safeClient, "iris", fetcherOptions),
+		robots:     crawl.NewRobotsClientWithOptions(safeClient, "iris", robotsOptions),
 		cacheStore: cacheStore,
 	}, nil
 }
@@ -602,11 +607,19 @@ func enqueueLocalDirJobs(ctx context.Context, jobStore jobs.Store, dir, runID st
 }
 
 func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, runID string, maxImages int) (int, error) {
+	validator := ssrf.NewValidator()
+	if err := validator.ValidateURL(ctx, seedURL); err != nil {
+		return 0, fmt.Errorf("SSRF blocked: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, seedURL, nil)
 	if err != nil {
 		return 0, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+
+	safeClient := validator.NewSafeClient(30 * time.Second)
+
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -614,7 +627,10 @@ func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, run
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("fetch url list: status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
+
+	// Limit reading to prevent OOM
+	limited := io.LimitReader(resp.Body, 10*1024*1024) // 10MB limit
+	body, err := io.ReadAll(limited)
 	if err != nil {
 		return 0, err
 	}

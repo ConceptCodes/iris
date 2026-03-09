@@ -46,13 +46,19 @@ func (s *LocalStore) Save(id, filename string, data []byte) (string, error) {
 }
 
 func assetExtension(filename string, data []byte) string {
-	if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
-		return ext
-	}
 	contentType := http.DetectContentType(data)
 	exts, err := mime.ExtensionsByType(contentType)
 	if err == nil && len(exts) > 0 {
+		// Prefer common extensions
+		for _, e := range exts {
+			if e == ".jpg" || e == ".png" || e == ".webp" || e == ".gif" {
+				return e
+			}
+		}
 		return exts[0]
+	}
+	if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
+		return ext
 	}
 	return ".bin"
 }

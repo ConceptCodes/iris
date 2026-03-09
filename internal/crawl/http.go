@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"iris/internal/constants"
+	"iris/internal/ssrf"
 )
 
 const maxFetchSize = 10 * 1024 * 1024 // 10 MB limit for HTML/sitemap content
@@ -136,6 +137,11 @@ func (f *CachedFetcher) Fetch(ctx context.Context, rawURL string) (FetchResult, 
 }
 
 func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cached cachedResource, hasCached bool) (FetchResult, bool, time.Duration, error) {
+	validator := ssrf.NewValidator()
+	if err := validator.ValidateURL(ctx, normalizedURL); err != nil {
+		return FetchResult{}, false, 0, fmt.Errorf("SSRF blocked: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, normalizedURL, nil)
 	if err != nil {
 		return FetchResult{}, false, 0, err
@@ -150,7 +156,9 @@ func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cac
 		}
 	}
 
-	resp, err := f.client.Do(req)
+	safeClient := validator.NewSafeClient(f.client.Timeout)
+
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return FetchResult{}, true, 0, err
 	}

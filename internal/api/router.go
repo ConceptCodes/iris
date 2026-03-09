@@ -53,7 +53,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		// In production, these should be self-hosted with SRI
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; "+
+				"script-src 'self' https://cdn.tailwindcss.com https://unpkg.com; "+
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: https:; "+
 				"font-src 'self'; "+
@@ -89,7 +89,7 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 		AllowedMethods:   []string{constants.MethodGET, constants.MethodPOST, constants.MethodOPTIONS},
 		AllowedHeaders:   []string{"Accept", constants.HeaderAuthorization, constants.HeaderContentType, constants.HeaderXCSRFToken},
 		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: true,
+		AllowCredentials: false,
 		MaxAge:           constants.CORSMaxAge,
 	}))
 	r.Use(securityHeaders)
@@ -124,23 +124,41 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 		r.Get(constants.PathAdminRuns, adminDisabled)
 		r.Get(constants.PathAdminRunDetail, adminDisabled)
 		r.Get(constants.PathAdminMetrics, adminDisabled)
-		r.Handle("/metrics", metrics.Handler())
+		r.Handle("/metrics", http.HandlerFunc(adminDisabled))
 	}
 
 	r.Get(constants.PathHealth, h.Health)
-
 	r.Get(constants.PathLanding, wh.LandingPage)
-	r.Get(constants.PathSearch, wh.SearchResults)
-	r.Get(constants.PathImage+"/{id}", wh.ImageDetail)
-	r.Get(constants.PathImageRelated, wh.RelatedImages)
-	r.Post(constants.PathSearchReverse, wh.ReverseImageSearch)
-	r.Post(constants.PathSearchReverseURL, wh.ReverseImageSearchURL)
 
-	r.Post(constants.PathIndexURL, h.IndexFromURL)
-	r.Post(constants.PathIndexUpload, h.IndexFromUpload)
-	r.Post(constants.PathSearchText, h.SearchText)
-	r.Post(constants.PathSearchImage, h.SearchImage)
-	r.Post(constants.PathSearchImageURL, h.SearchImageURL)
+	// Public search routes with rate limiting
+	r.Group(func(r chi.Router) {
+		r.Use(RateLimit(10, 20)) // Moderate rate limit for search
+		r.Get(constants.PathSearch, wh.SearchResults)
+		r.Get(constants.PathImage+"/{id}", wh.ImageDetail)
+		r.Get(constants.PathImageRelated, wh.RelatedImages)
+
+		r.Group(func(r chi.Router) {
+			r.Use(MaxRequestSize(constants.MaxImageSize))
+			r.Post(constants.PathSearchReverse, wh.ReverseImageSearch)
+			r.Post(constants.PathSearchReverseURL, wh.ReverseImageSearchURL)
+			r.Post(constants.PathSearchText, h.SearchText)
+			r.Post(constants.PathSearchImage, h.SearchImage)
+			r.Post(constants.PathSearchImageURL, h.SearchImageURL)
+		})
+	})
+
+	// Indexing routes - moved to authorized group for mutation
+	if authorizer.enabled() {
+		r.Group(func(r chi.Router) {
+			r.Use(authorizer.requireRole(adminRoleWrite), RateLimit(2, 5), MaxRequestSize(constants.MaxImageSize))
+			r.Post(constants.PathIndexURL, h.IndexFromURL)
+			r.Post(constants.PathIndexUpload, h.IndexFromUpload)
+		})
+	} else {
+		r.Post(constants.PathIndexURL, adminDisabled)
+		r.Post(constants.PathIndexUpload, adminDisabled)
+	}
+
 	if assetDir != "" {
 		r.Handle(constants.PathAssets+"/*", http.StripPrefix(constants.PathAssets+"/", http.FileServer(http.Dir(assetDir))))
 	}
@@ -272,5 +290,5 @@ func adminTokenFromRequest(r *http.Request) string {
 }
 
 func adminDisabled(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, constants.MessageAdminAPIDisabled, http.StatusServiceUnavailable)
+	http.Error(w, constants.MessageNotFound, http.StatusNotFound)
 }

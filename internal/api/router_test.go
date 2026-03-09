@@ -170,8 +170,8 @@ func TestRouterAdminDisabledWithoutKey(t *testing.T) {
 	req := httptest.NewRequest("GET", "/admin/runs", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	if w.Result().StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", w.Result().StatusCode)
+	if w.Result().StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Result().StatusCode)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestRouterAdminMetricsDisabled(t *testing.T) {
 	req := httptest.NewRequest("GET", "/admin/metrics", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	if w.Result().StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", w.Result().StatusCode)
+	if w.Result().StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Result().StatusCode)
 	}
 }

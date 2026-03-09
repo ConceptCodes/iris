@@ -96,7 +96,10 @@ func (c *Client) EmbedImageURL(ctx context.Context, imageURL string) (models.Emb
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	resp, err := c.httpClient.Do(req)
+
+	safeClient := validator.NewSafeClient(constants.HTTPTimeout30s)
+
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch image url: %w", err)
 	}

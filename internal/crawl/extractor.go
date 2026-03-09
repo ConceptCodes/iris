@@ -9,9 +9,11 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"golang.org/x/net/html"
 
+	"iris/internal/ssrf"
 	"iris/internal/tracing"
 
 	"go.opentelemetry.io/otel"
@@ -141,7 +143,9 @@ func extractSitemapLocs(r io.Reader) ([]string, error) {
 		}
 	)
 
-	body, err := io.ReadAll(r)
+	// Limit reading to prevent OOM
+	limited := io.LimitReader(r, 10*1024*1024) // 10MB limit
+	body, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err
 	}
@@ -177,11 +181,19 @@ func ExtractSitemapLocs(r io.Reader) ([]string, error) {
 }
 
 func FetchSitemapLocs(ctx context.Context, sitemapURL string) ([]string, error) {
+	validator := ssrf.NewValidator()
+	if err := validator.ValidateURL(ctx, sitemapURL); err != nil {
+		return nil, fmt.Errorf("SSRF blocked: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sitemapURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+
+	safeClient := validator.NewSafeClient(30 * time.Second)
+
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

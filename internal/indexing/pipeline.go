@@ -268,7 +268,10 @@ func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, ma
 	if err != nil {
 		return nil, "", fmt.Errorf("create request: %w", err)
 	}
-	resp, err := client.Do(req)
+
+	safeClient := validator.NewSafeClient(constants.HTTPTimeout30s)
+
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("fetch image url: %w", err)
 	}
