@@ -14,14 +14,14 @@ templ DetailPanel(result models.SearchResult) {
 		</div>
 		<div class="mb-4 flex justify-center">
 			<img
-				src={ result.Record.URL }
+				src={ imageURL(result.Record) }
 				alt={ result.Record.Filename }
 				class="max-h-96 object-contain rounded"
 			/>
 		</div>
 		<div class="flex gap-2 mb-4">
 			<a
-				href={ result.Record.URL }
+				href={ imageURL(result.Record) }
 				target="_blank"
 				rel="noopener noreferrer"
 				class="flex-1 px-4 py-2 border border-[#1a73e8] text-[#1a73e8] text-sm font-medium rounded-full text-center hover:bg-blue-50 transition-colors"
@@ -29,7 +29,7 @@ templ DetailPanel(result models.SearchResult) {
 				Visit
 			</a>
 			<a
-				href={ result.Record.URL }
+				href={ imageURL(result.Record) }
 				target="_blank"
 				rel="noopener noreferrer"
 				class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 dark:text-gray-100 text-sm font-medium rounded-full text-center hover:bg-gray-200 transition-colors"
@@ -41,7 +41,7 @@ templ DetailPanel(result models.SearchResult) {
 			if result.Record.Filename != "" {
 				<h3 class="font-medium text-gray-900 dark:text-white mb-1 truncate">{ result.Record.Filename }</h3>
 			}
-			<p class="text-sm text-gray-500 dark:text-gray-400 dark:text-gray-300 truncate mb-2">{ result.Record.URL }</p>
+			<p class="text-sm text-gray-500 dark:text-gray-400 dark:text-gray-300 truncate mb-2">{ imageURL(result.Record) }</p>
 			<p class="text-sm text-gray-600 dark:text-gray-300 mb-2">Score: { fmt.Sprintf("%.2f", result.Score) }</p>
 			if len(result.Record.Tags) > 0 {
 				<div class="flex flex-wrap gap-1 mb-2">

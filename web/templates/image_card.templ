@@ -14,7 +14,7 @@ templ ImageCard(result models.SearchResult, index int) {
 		hx-swap="innerHTML"
 	>
 		<img
-			src={ result.Record.URL }
+			src={ imageURL(result.Record) }
 			alt={ result.Record.Filename }
 			loading="lazy"
 			class="w-full object-cover rounded"
