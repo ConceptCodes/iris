@@ -60,21 +60,6 @@ Visit [http://localhost:8080](http://localhost:8080) to use the UI.
 | `postgres` | 5432 | Worker Job Store |
 | `grafana` | 3000 | Observability Dashboard |
 
-## Documentation
-
-- [API Reference](docs/api.md) - Search, Index, and Admin endpoints.
-- [Worker & Indexing](docs/worker.md) - Background worker and CLI tools.
-- [Observability](docs/observability.md) - Metrics, Tracing, and Dashboards.
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ADMIN_API_KEY` | empty | Admin write token for `/admin/*` routes |
-| `CLIP_ADDR` | `http://localhost:8001` | CLIP sidecar base URL |
-| `QDRANT_ADDR` | `localhost:6334` | Qdrant gRPC address |
-| `JOB_BACKEND` | `memory` | Job store: `memory` or `postgres` |
-| `ASSET_DIR` | `./data/assets` | Local image storage path |
 
 ## Scaling Notes
 
