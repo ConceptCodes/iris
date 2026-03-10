@@ -6,7 +6,7 @@ import "fmt"
 templ DetailPanel(result models.SearchResult) {
 	<div class="p-4">
 		<div class="flex justify-between items-start mb-4">
-			<button id="close-panel-btn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full">
+			<button id="close-panel-btn" class="p-2 hover:bg-gray-100 dark:hover:bg-dark-hover rounded-full">
 				<svg class="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
 				</svg>
@@ -38,7 +38,7 @@ templ DetailPanel(result models.SearchResult) {
 			if len(result.Record.Tags) > 0 {
 				<div class="flex flex-wrap gap-1 mb-2">
 					for _, tag := range result.Record.Tags {
-						<span class="px-2 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-xs rounded">{ tag }</span>
+						<span class="px-2 py-1 bg-gray-100 dark:bg-dark-surface text-gray-600 dark:text-gray-300 text-xs rounded">{ tag }</span>
 					}
 				</div>
 			}
@@ -47,7 +47,7 @@ templ DetailPanel(result models.SearchResult) {
 			<h4 class="text-sm font-medium text-gray-700 dark:text-gray-100 mb-3">Related images</h4>
 			<div
 				id={ "related-" + result.Record.ID }
-				hx-get={ "/related/" + result.Record.ID }
+				hx-get={ "/image/" + result.Record.ID + "/related" }
 				hx-trigger="load"
 				class="grid grid-cols-3 gap-2"
 			>

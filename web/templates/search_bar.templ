@@ -1,8 +1,8 @@
 package templates
 
 templ SearchBar(query string, variant string) {
-	<form action="/search" method="GET" class={ "w-full", templ.KV("max-w-[584px] mx-auto", variant == "hero") }>
-		<div class="search-box flex items-center h-11 pl-4 pr-0 bg-white dark:bg-gray-800 border border-[#dfe1e5] dark:border-gray-600 rounded-full hover:shadow-md transition-shadow">
+	<form id="search-form" action="/search" method="GET" class={ "w-full", templ.KV("max-w-[584px] mx-auto", variant == "hero") }>
+		<div class="search-box flex items-center h-11 pl-4 pr-0 bg-white dark:bg-dark-surface border border-[#dfe1e5] dark:border-gray-600 rounded-full hover:shadow-md transition-shadow">
 			<svg class="w-5 h-5 text-gray-400 dark:text-gray-300 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
 			</svg>
@@ -13,12 +13,13 @@ templ SearchBar(query string, variant string) {
 				value={ query }
 				placeholder="Search images"
 				autocomplete="off"
+				required
 				class="flex-1 bg-transparent outline-none text-base dark:text-white"
 			/>
 			<button
 				id="clear-btn"
 				type="button"
-				class="hidden mr-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
+				class="hidden mr-2 p-1 hover:bg-gray-100 dark:hover:bg-dark-hover rounded-full"
 			>
 				<svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -28,7 +29,7 @@ templ SearchBar(query string, variant string) {
 			<button
 				id="open-upload-modal-btn"
 				type="button"
-				class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
+				class="p-2 hover:bg-gray-100 dark:hover:bg-dark-hover rounded-full"
 			>
 				<svg class="w-6 h-6 text-[#4285f4] dark:text-[#8ab4f8]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>

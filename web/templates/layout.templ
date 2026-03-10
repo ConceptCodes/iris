@@ -23,7 +23,10 @@ templ Layout(title string, query string) {
 								red: '#ea4335',
 								yellow: '#fbbc05',
 								green: '#34a853'
-							}
+							},
+							'dark-bg': '#1f1f1f',
+							'dark-surface': '#2d2e31',
+							'dark-hover': '#3c4043'
 						}
 					}
 				}
@@ -38,16 +41,16 @@ templ Layout(title string, query string) {
 		<script src="https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js"></script>
 		<link rel="stylesheet" href="/static/app.css"/>
 	</head>
-	<body class="bg-white dark:bg-gray-900 min-h-screen transition-colors">
+	<body class="bg-white dark:bg-dark-bg min-h-screen transition-colors">
 		<div id="upload-modal" class="fixed inset-0 z-50 hidden">
 			<div id="upload-modal-overlay" class="absolute inset-0 bg-black bg-opacity-40"></div>
-			<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-[560px] max-w-[95vw]">
+			<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-dark-surface rounded-2xl shadow-2xl w-[560px] max-w-[95vw]">
 				@UploadModal()
 			</div>
 		</div>
 		<div
 			id="detail-panel-container"
-			class="fixed top-[100px] right-0 bottom-0 w-[430px] bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 translate-x-full overflow-y-auto z-40"
+			class="fixed top-[100px] right-0 bottom-0 w-[430px] bg-white dark:bg-dark-bg border-l border-gray-200 dark:border-gray-700 translate-x-full overflow-y-auto z-40"
 		>
 			<div id="detail-panel"></div>
 		</div>

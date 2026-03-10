@@ -1,9 +1,20 @@
 let currentIndex = -1;
 const cards = [];
+const supportedUploadTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/bmp",
+  "image/tiff",
+]);
+const supportedUploadExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"];
+const maxUploadBytes = 20 * 1024 * 1024;
 
 function openPanel(cardEl) {
   const container = document.getElementById("detail-panel-container");
   const grid = document.getElementById("results-grid");
+  if (!container || !grid) return;
   container.classList.remove("translate-x-full");
   grid.classList.add("panel-open");
   currentIndex = parseInt(cardEl.dataset.index);
@@ -15,6 +26,7 @@ function openPanel(cardEl) {
 function closePanel() {
   const container = document.getElementById("detail-panel-container");
   const grid = document.getElementById("results-grid");
+  if (!container || !grid) return;
   container.classList.add("translate-x-full");
   grid.classList.remove("panel-open");
   currentIndex = -1;
@@ -42,6 +54,7 @@ function openUploadModal() {
 
 function closeUploadModal() {
   document.getElementById("upload-modal").classList.add("hidden");
+  resetUploadState();
 }
 
 function showUploadTab() {
@@ -58,20 +71,94 @@ function showUrlTab() {
   document.getElementById("tab-upload").classList.remove("active");
 }
 
+function setUploadStatus(message, tone) {
+  const status = document.getElementById("upload-status");
+  if (!status) return;
+
+  status.textContent = message;
+  status.classList.remove(
+    "hidden",
+    "border-red-200",
+    "text-red-700",
+    "bg-red-50",
+    "dark:border-red-900/60",
+    "dark:text-red-200",
+    "dark:bg-red-950/40",
+    "border-blue-200",
+    "text-blue-700",
+    "bg-blue-50",
+    "dark:border-blue-900/60",
+    "dark:text-blue-200",
+    "dark:bg-blue-950/40"
+  );
+
+  if (tone === "error") {
+    status.classList.add("border-red-200", "text-red-700", "bg-red-50", "dark:border-red-900/60", "dark:text-red-200", "dark:bg-red-950/40");
+  } else {
+    status.classList.add("border-blue-200", "text-blue-700", "bg-blue-50", "dark:border-blue-900/60", "dark:text-blue-200", "dark:bg-blue-950/40");
+  }
+}
+
+function resetDropZoneContent() {
+  const dropZoneContent = document.getElementById("drop-zone-content");
+  if (!dropZoneContent) return;
+
+  dropZoneContent.innerHTML =
+    '<svg class="w-12 h-12 text-gray-400 dark:text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+    '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>' +
+    "</svg>" +
+    '<p class="text-gray-600 dark:text-gray-300 mb-2">Drag & drop an image here</p>' +
+    '<p class="text-gray-400 dark:text-gray-300 text-sm mb-1">Supported: JPG, PNG, WebP, GIF, BMP, TIFF</p>' +
+    '<p class="text-gray-400 dark:text-gray-300 text-sm mb-3">Up to 20 MB</p>' +
+    '<button type="button" class="px-4 py-2 bg-[#1a73e8] dark:bg-[#8ab4f8] text-white dark:text-gray-900 text-sm font-medium rounded hover:bg-[#1557b0] dark:hover:bg-[#a1c4fd] transition-colors">Upload from computer</button>';
+}
+
+function resetUploadState() {
+  const fileInput = document.getElementById("file-input");
+  if (fileInput) {
+    fileInput.value = "";
+  }
+  const status = document.getElementById("upload-status");
+  if (status) {
+    status.textContent = "";
+    status.classList.add("hidden");
+  }
+  resetDropZoneContent();
+}
+
+function isSupportedUpload(file) {
+  const fileName = file.name.toLowerCase();
+  const hasSupportedExtension = supportedUploadExtensions.some((ext) => fileName.endsWith(ext));
+  return supportedUploadTypes.has(file.type) || hasSupportedExtension;
+}
+
 function handleFileSelect(input) {
   if (input.files && input.files[0]) {
+    const file = input.files[0];
+    if (!isSupportedUpload(file)) {
+      setUploadStatus("Unsupported file type. Use JPG, PNG, WebP, GIF, BMP, or TIFF.", "error");
+      input.value = "";
+      resetDropZoneContent();
+      return;
+    }
+    if (file.size > maxUploadBytes) {
+      setUploadStatus("File is too large. Use an image up to 20 MB.", "error");
+      input.value = "";
+      resetDropZoneContent();
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = function (e) {
       const dropZoneContent = document.getElementById("drop-zone-content");
       dropZoneContent.innerHTML =
         '<img src="' +
         e.target.result +
-        '" class="max-h-48 mx-auto rounded mb-3"/><p class="text-gray-600 dark:text-gray-300">Uploading...</p>';
-      document
-        .getElementById("upload-form")
-        .dispatchEvent(new Event("submit", { bubbles: true }));
+        '" alt="" class="max-h-48 mx-auto rounded mb-3"/><p class="text-gray-600 dark:text-gray-300 font-medium">Uploading and searching...</p>';
+      setUploadStatus("Uploading image and searching similar results...", "info");
+      document.getElementById("upload-form")?.requestSubmit();
     };
-    reader.readAsDataURL(input.files[0]);
+    reader.readAsDataURL(file);
   }
 }
 
@@ -93,9 +180,31 @@ document.getElementById("search-input").addEventListener("input", function () {
 });
 
 document.body.addEventListener("htmx:beforeSwap", function (evt) {
-  if (evt.detail.target.id === "results-grid") {
+  if (evt.detail.target.id === "results-region") {
     closeUploadModal();
   }
+});
+
+document.body.addEventListener("htmx:responseError", function (evt) {
+  const form = evt.detail.elt;
+  if (!form || (form.id !== "upload-form" && form.id !== "url-form")) return;
+
+  const xhr = evt.detail.xhr;
+  const message = xhr?.responseText?.trim() || "Search failed. Try another supported image.";
+  setUploadStatus(message, "error");
+});
+
+document.body.addEventListener("htmx:sendError", function (evt) {
+  const form = evt.detail.elt;
+  if (!form || form.id !== "upload-form") return;
+  setUploadStatus("Upload failed before reaching the server. Try again.", "error");
+});
+
+document.body.addEventListener("htmx:afterRequest", function (evt) {
+  const form = evt.detail.elt;
+  if (!form || form.id !== "upload-form") return;
+  if (!evt.detail.successful) return;
+  resetUploadState();
 });
 // Theme toggle functionality
 function toggleTheme() {
@@ -190,6 +299,17 @@ document.addEventListener("DOMContentLoaded", function () {
   const openUploadBtn = document.getElementById("open-upload-modal-btn");
   if (openUploadBtn) {
     openUploadBtn.addEventListener("click", openUploadModal);
+  }
+
+  // Prevent empty searches
+  const searchForm = document.getElementById("search-form");
+  if (searchForm && searchInput) {
+    searchForm.addEventListener("submit", (e) => {
+      if (!searchInput.value.trim()) {
+        e.preventDefault();
+        searchInput.focus();
+      }
+    });
   }
 
   // Event Delegation for dynamic elements
