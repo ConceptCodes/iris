@@ -9,6 +9,7 @@ import (
 	pb "github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"iris/internal/constants"
 	"iris/internal/tracing"
 	"iris/pkg/models"
@@ -22,6 +23,7 @@ type QdrantStore struct {
 	collections pb.CollectionsClient
 	points      pb.PointsClient
 	dims        map[models.Encoder]uint64
+	legacyClip  bool
 }
 
 var tracer = otel.Tracer("iris/qdrant")
@@ -62,7 +64,7 @@ func (s *QdrantStore) ensureCollection(ctx context.Context) error {
 	}
 	for _, c := range resp.GetCollections() {
 		if c.Name == constants.CollectionNameImages {
-			return nil
+			return s.inspectCollection(ctx)
 		}
 	}
 	_, err = s.collections.Create(ctx, &pb.CreateCollection{
@@ -72,9 +74,39 @@ func (s *QdrantStore) ensureCollection(ctx context.Context) error {
 		}},
 	})
 	if err != nil {
+		if strings.Contains(status.Convert(err).Message(), "already exists") {
+			return s.inspectCollection(ctx)
+		}
 		return fmt.Errorf("create collection: %w", err)
 	}
 	return nil
+}
+
+func (s *QdrantStore) inspectCollection(ctx context.Context) error {
+	resp, err := s.collections.Get(ctx, &pb.GetCollectionInfoRequest{
+		CollectionName: constants.CollectionNameImages,
+	})
+	if err != nil {
+		return fmt.Errorf("get collection info: %w", err)
+	}
+
+	vectors := resp.GetResult().GetConfig().GetParams().GetVectorsConfig()
+	switch cfg := vectors.GetConfig().(type) {
+	case *pb.VectorsConfig_Params:
+		s.legacyClip = true
+		if cfg.Params.GetSize() != s.dims[models.EncoderCLIP] {
+			return fmt.Errorf("legacy collection vector size mismatch: got %d want %d", cfg.Params.GetSize(), s.dims[models.EncoderCLIP])
+		}
+		return nil
+	case *pb.VectorsConfig_ParamsMap:
+		s.legacyClip = false
+		if _, ok := cfg.ParamsMap.GetMap()[string(models.EncoderCLIP)]; !ok {
+			return fmt.Errorf("collection is missing required %q vector config", models.EncoderCLIP)
+		}
+		return nil
+	default:
+		return fmt.Errorf("collection vectors config is unsupported")
+	}
 }
 
 func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, embeddings models.Embeddings) (string, error) {
@@ -89,6 +121,29 @@ func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, emb
 	defer span.End()
 
 	id := record.ID
+	if s.legacyClip {
+		clipEmbedding, ok := embeddings[models.EncoderCLIP]
+		if !ok {
+			err := fmt.Errorf("legacy collection only supports encoder %s", models.EncoderCLIP)
+			tracing.AddErrorToSpan(span, err)
+			return "", err
+		}
+		point := &pb.PointStruct{
+			Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: id}},
+			Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vector{Vector: &pb.Vector{Data: clipEmbedding}}},
+			Payload: s.recordToPayload(record),
+		}
+		_, err := s.points.Upsert(ctx, &pb.UpsertPoints{
+			CollectionName: constants.CollectionNameImages,
+			Points:         []*pb.PointStruct{point},
+		})
+		if err != nil {
+			tracing.AddErrorToSpan(span, err)
+			return "", fmt.Errorf("upsert: %w", err)
+		}
+		return id, nil
+	}
+
 	namedVectors := make(map[string]*pb.Vector, len(embeddings))
 	for name, embedding := range embeddings {
 		namedVectors[string(name)] = &pb.Vector{Data: embedding}
@@ -124,14 +179,24 @@ func (s *QdrantStore) Search(ctx context.Context, enc models.Encoder, embedding 
 		conditions := buildFilterConditions(filters)
 		filter = &pb.Filter{Must: conditions}
 	}
-	resp, err := s.points.Search(ctx, &pb.SearchPoints{
+	req := &pb.SearchPoints{
 		CollectionName: constants.CollectionNameImages,
 		Vector:         embedding,
-		VectorName:     pointer(string(enc)),
 		Limit:          uint64(topK),
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
 		Filter:         filter,
-	})
+	}
+	if s.legacyClip {
+		if enc != models.EncoderCLIP {
+			err := fmt.Errorf("legacy collection only supports encoder %s", models.EncoderCLIP)
+			tracing.AddErrorToSpan(span, err)
+			return nil, err
+		}
+	} else {
+		req.VectorName = pointer(string(enc))
+	}
+
+	resp, err := s.points.Search(ctx, req)
 	if err != nil {
 		tracing.AddErrorToSpan(span, err)
 		return nil, fmt.Errorf("search: %w", err)

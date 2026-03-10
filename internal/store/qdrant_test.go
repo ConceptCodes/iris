@@ -41,7 +41,9 @@ func TestQdrantStore_PayloadRoundtrip(t *testing.T) {
 type mockCollectionsClient struct {
 	pb.CollectionsClient
 	listResp  *pb.ListCollectionsResponse
+	getResp   *pb.GetCollectionInfoResponse
 	listErr   error
+	getErr    error
 	createErr error
 	created   bool
 }
@@ -53,6 +55,9 @@ func (m *mockCollectionsClient) Create(ctx context.Context, in *pb.CreateCollect
 	m.created = true
 	return nil, m.createErr
 }
+func (m *mockCollectionsClient) Get(ctx context.Context, in *pb.GetCollectionInfoRequest, opts ...grpc.CallOption) (*pb.GetCollectionInfoResponse, error) {
+	return m.getResp, m.getErr
+}
 
 func TestQdrantStore_ensureCollection(t *testing.T) {
 	t.Run("existing", func(t *testing.T) {
@@ -62,8 +67,23 @@ func TestQdrantStore_ensureCollection(t *testing.T) {
 					{Name: constants.CollectionNameImages},
 				},
 			},
+			getResp: &pb.GetCollectionInfoResponse{
+				Result: &pb.CollectionInfo{
+					Config: &pb.CollectionConfig{
+						Params: &pb.CollectionParams{
+							VectorsConfig: &pb.VectorsConfig{
+								Config: &pb.VectorsConfig_ParamsMap{
+									ParamsMap: &pb.VectorParamsMap{Map: map[string]*pb.VectorParams{
+										string(models.EncoderCLIP): {Size: 512},
+									}},
+								},
+							},
+						},
+					},
+				},
+			},
 		}
-		s := &QdrantStore{collections: mockC}
+		s := &QdrantStore{collections: mockC, dims: map[models.Encoder]uint64{models.EncoderCLIP: 512}}
 		err := s.ensureCollection(context.Background())
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -86,6 +106,37 @@ func TestQdrantStore_ensureCollection(t *testing.T) {
 			t.Errorf("should have called create")
 		}
 	})
+
+	t.Run("legacy collection", func(t *testing.T) {
+		mockC := &mockCollectionsClient{
+			listResp: &pb.ListCollectionsResponse{
+				Collections: []*pb.CollectionDescription{
+					{Name: constants.CollectionNameImages},
+				},
+			},
+			getResp: &pb.GetCollectionInfoResponse{
+				Result: &pb.CollectionInfo{
+					Config: &pb.CollectionConfig{
+						Params: &pb.CollectionParams{
+							VectorsConfig: &pb.VectorsConfig{
+								Config: &pb.VectorsConfig_Params{
+									Params: &pb.VectorParams{Size: 512},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		s := &QdrantStore{collections: mockC, dims: map[models.Encoder]uint64{models.EncoderCLIP: 512}}
+		err := s.ensureCollection(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !s.legacyClip {
+			t.Fatalf("expected legacyClip to be enabled")
+		}
+	})
 }
 
 // Full interface implementations for mockPointsClient below
@@ -103,14 +154,22 @@ type mockPointsClient struct {
 
 	lastTopK   uint64
 	lastFilter *pb.Filter
+	lastVectorName string
+	lastNamedUpsert bool
 }
 
 func (m *mockPointsClient) Upsert(ctx context.Context, in *pb.UpsertPoints, opts ...grpc.CallOption) (*pb.PointsOperationResponse, error) {
+	if len(in.Points) > 0 && in.Points[0].GetVectors() != nil {
+		if in.Points[0].GetVectors().GetVectors() != nil {
+			m.lastNamedUpsert = true
+		}
+	}
 	return nil, m.upsertErr
 }
 func (m *mockPointsClient) Search(ctx context.Context, in *pb.SearchPoints, opts ...grpc.CallOption) (*pb.SearchResponse, error) {
 	m.lastTopK = in.Limit
 	m.lastFilter = in.Filter
+	m.lastVectorName = in.GetVectorName()
 	return m.searchResp, m.searchErr
 }
 func (m *mockPointsClient) Delete(ctx context.Context, in *pb.DeletePoints, opts ...grpc.CallOption) (*pb.PointsOperationResponse, error) {
@@ -160,6 +219,46 @@ func TestQdrantStore_DataOperations(t *testing.T) {
 		cond := mc.lastFilter.Must[0].GetField()
 		if cond.Key != "k" || cond.Match.GetKeyword() != "v" {
 			t.Errorf("filter mismatch")
+		}
+		if mc.lastVectorName != string(models.EncoderCLIP) {
+			t.Fatalf("expected vector name %q, got %q", models.EncoderCLIP, mc.lastVectorName)
+		}
+	})
+
+	t.Run("legacy search omits vector name", func(t *testing.T) {
+		mc := &mockPointsClient{
+			searchResp: &pb.SearchResponse{Result: []*pb.ScoredPoint{}},
+		}
+		s := &QdrantStore{points: mc, legacyClip: true}
+		_, err := s.Search(context.Background(), models.EncoderCLIP, models.Embedding{1.0}, 10, nil)
+		if err != nil {
+			t.Fatalf("expected no err, got %v", err)
+		}
+		if mc.lastVectorName != "" {
+			t.Fatalf("expected empty vector name for legacy collection, got %q", mc.lastVectorName)
+		}
+	})
+
+	t.Run("legacy search rejects siglip2", func(t *testing.T) {
+		s := &QdrantStore{points: &mockPointsClient{}, legacyClip: true}
+		_, err := s.Search(context.Background(), models.EncoderSigLIP2, models.Embedding{1.0}, 10, nil)
+		if err == nil {
+			t.Fatalf("expected error")
+		}
+	})
+
+	t.Run("legacy upsert stores clip vector", func(t *testing.T) {
+		mc := &mockPointsClient{}
+		s := &QdrantStore{points: mc, legacyClip: true}
+		_, err := s.Upsert(context.Background(), models.ImageRecord{ID: "x"}, models.Embeddings{
+			models.EncoderCLIP: {1.0},
+			models.EncoderSigLIP2: {2.0},
+		})
+		if err != nil {
+			t.Fatalf("expected no err, got %v", err)
+		}
+		if mc.lastNamedUpsert {
+			t.Fatalf("expected legacy upsert to use unnamed vector")
 		}
 	})
 
