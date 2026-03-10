@@ -1,6 +1,19 @@
 package models
 
+import "strings"
+
 type Embedding []float32
+type Encoder string
+type Embeddings map[Encoder]Embedding
+
+const (
+	EncoderCLIP    Encoder = "clip"
+	EncoderSigLIP2 Encoder = "siglip2"
+)
+
+func NormalizeEncoder(value Encoder) Encoder {
+	return Encoder(strings.ToLower(strings.TrimSpace(string(value))))
+}
 
 type ImageRecord struct {
 	ID       string            `json:"id"`
@@ -26,18 +39,21 @@ type TextSearchRequest struct {
 	Query   string            `json:"query"`
 	TopK    int               `json:"top_k,omitempty"`
 	Filters map[string]string `json:"filters,omitempty"`
+	Encoder Encoder           `json:"encoder,omitempty"`
 }
 
 type TextSearchResponse struct {
 	Results []SearchResult `json:"results"`
 	Query   string         `json:"query"`
 	TookMs  int64          `json:"took_ms"`
+	Encoder Encoder        `json:"encoder,omitempty"`
 }
 
 type ImageSearchResponse struct {
 	Results []SearchResult `json:"results"`
 	Query   string         `json:"query,omitempty"`
 	TookMs  int64          `json:"took_ms"`
+	Encoder Encoder        `json:"encoder,omitempty"`
 }
 
 type IndexResponse struct {
