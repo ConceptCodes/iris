@@ -21,12 +21,18 @@ type QdrantStore struct {
 	conn        *grpc.ClientConn
 	collections pb.CollectionsClient
 	points      pb.PointsClient
-	dim         uint64
+	dims        map[models.Encoder]uint64
 }
 
 var tracer = otel.Tracer("iris/qdrant")
 
 func NewQdrantStore(addr string, dim int, connectTimeout time.Duration) (*QdrantStore, error) {
+	return NewQdrantStoreWithEncoders(addr, map[models.Encoder]int{
+		models.EncoderCLIP: dim,
+	}, connectTimeout)
+}
+
+func NewQdrantStoreWithEncoders(addr string, dims map[models.Encoder]int, connectTimeout time.Duration) (*QdrantStore, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
 	conn, err := grpc.DialContext(ctx, addr,
@@ -40,7 +46,7 @@ func NewQdrantStore(addr string, dim int, connectTimeout time.Duration) (*Qdrant
 		conn:        conn,
 		collections: pb.NewCollectionsClient(conn),
 		points:      pb.NewPointsClient(conn),
-		dim:         uint64(dim),
+		dims:        normalizeDims(dims),
 	}
 	if err := store.ensureCollection(ctx); err != nil {
 		conn.Close()
@@ -61,11 +67,8 @@ func (s *QdrantStore) ensureCollection(ctx context.Context) error {
 	}
 	_, err = s.collections.Create(ctx, &pb.CreateCollection{
 		CollectionName: constants.CollectionNameImages,
-		VectorsConfig: &pb.VectorsConfig{Config: &pb.VectorsConfig_Params{
-			Params: &pb.VectorParams{
-				Size:     s.dim,
-				Distance: pb.Distance_Cosine,
-			},
+		VectorsConfig: &pb.VectorsConfig{Config: &pb.VectorsConfig_ParamsMap{
+			ParamsMap: &pb.VectorParamsMap{Map: s.vectorParamsMap()},
 		}},
 	})
 	if err != nil {
@@ -74,21 +77,25 @@ func (s *QdrantStore) ensureCollection(ctx context.Context) error {
 	return nil
 }
 
-func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, embedding models.Embedding) (string, error) {
+func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, embeddings models.Embeddings) (string, error) {
 	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "Upsert",
 		[]attribute.KeyValue{
 			attribute.String("id", record.ID),
 			attribute.String("url", record.URL),
 			attribute.Int("tags_count", len(record.Tags)),
-			attribute.Int("embedding_dim", len(embedding)),
+			attribute.Int("encoders_count", len(embeddings)),
 		},
 	)
 	defer span.End()
 
 	id := record.ID
+	namedVectors := make(map[string]*pb.Vector, len(embeddings))
+	for name, embedding := range embeddings {
+		namedVectors[string(name)] = &pb.Vector{Data: embedding}
+	}
 	point := &pb.PointStruct{
 		Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: id}},
-		Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vector{Vector: &pb.Vector{Data: embedding}}},
+		Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vectors{Vectors: &pb.NamedVectors{Vectors: namedVectors}}},
 		Payload: s.recordToPayload(record),
 	}
 	_, err := s.points.Upsert(ctx, &pb.UpsertPoints{
@@ -102,7 +109,7 @@ func (s *QdrantStore) Upsert(ctx context.Context, record models.ImageRecord, emb
 	return id, nil
 }
 
-func (s *QdrantStore) Search(ctx context.Context, embedding models.Embedding, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (s *QdrantStore) Search(ctx context.Context, enc models.Encoder, embedding models.Embedding, topK int, filters map[string]string) ([]models.SearchResult, error) {
 	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "Search",
 		[]attribute.KeyValue{
 			attribute.Int("top_k", topK),
@@ -120,6 +127,7 @@ func (s *QdrantStore) Search(ctx context.Context, embedding models.Embedding, to
 	resp, err := s.points.Search(ctx, &pb.SearchPoints{
 		CollectionName: constants.CollectionNameImages,
 		Vector:         embedding,
+		VectorName:     pointer(string(enc)),
 		Limit:          uint64(topK),
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
 		Filter:         filter,
@@ -201,13 +209,17 @@ func (s *QdrantStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *QdrantStore) GetVector(ctx context.Context, id string) (models.Embedding, error) {
+func (s *QdrantStore) GetVector(ctx context.Context, id string, enc models.Encoder) (models.Embedding, error) {
 	resp, err := s.points.Get(ctx, &pb.GetPoints{
 		CollectionName: constants.CollectionNameImages,
 		Ids: []*pb.PointId{
 			{PointIdOptions: &pb.PointId_Uuid{Uuid: id}},
 		},
-		WithVectors: &pb.WithVectorsSelector{SelectorOptions: &pb.WithVectorsSelector_Enable{Enable: true}},
+		WithVectors: &pb.WithVectorsSelector{
+			SelectorOptions: &pb.WithVectorsSelector_Include{
+				Include: &pb.VectorsSelector{Names: []string{string(enc)}},
+			},
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("get point: %w", err)
@@ -223,7 +235,12 @@ func (s *QdrantStore) GetVector(ctx context.Context, id string) (models.Embeddin
 	if v := vecs.GetVector(); v != nil {
 		return v.Data, nil
 	}
-	return nil, fmt.Errorf("no vector data in response")
+	if named := vecs.GetVectors(); named != nil {
+		if vector, ok := named.GetVectors()[string(enc)]; ok && vector != nil {
+			return vector.Data, nil
+		}
+	}
+	return nil, fmt.Errorf("no vector data in response for encoder %s", enc)
 }
 
 func (s *QdrantStore) recordToPayload(record models.ImageRecord) map[string]*pb.Value {
@@ -330,4 +347,34 @@ func (s *QdrantStore) ListImages(ctx context.Context, filters map[string]string,
 
 func (s *QdrantStore) Close() error {
 	return s.conn.Close()
+}
+
+func (s *QdrantStore) vectorParamsMap() map[string]*pb.VectorParams {
+	params := make(map[string]*pb.VectorParams, len(s.dims))
+	for name, dim := range s.dims {
+		params[string(name)] = &pb.VectorParams{
+			Size:     dim,
+			Distance: pb.Distance_Cosine,
+		}
+	}
+	return params
+}
+
+func normalizeDims(dims map[models.Encoder]int) map[models.Encoder]uint64 {
+	normalized := make(map[models.Encoder]uint64, len(dims))
+	for name, dim := range dims {
+		enc := models.NormalizeEncoder(name)
+		if enc == "" || dim <= 0 {
+			continue
+		}
+		normalized[enc] = uint64(dim)
+	}
+	if len(normalized) == 0 {
+		normalized[models.EncoderCLIP] = 512
+	}
+	return normalized
+}
+
+func pointer[T any](value T) *T {
+	return &value
 }

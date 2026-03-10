@@ -127,7 +127,7 @@ func (m *mockPointsClient) Scroll(ctx context.Context, in *pb.ScrollPoints, opts
 func TestQdrantStore_DataOperations(t *testing.T) {
 	t.Run("Upsert success", func(t *testing.T) {
 		s := &QdrantStore{points: &mockPointsClient{upsertErr: nil}}
-		id, err := s.Upsert(context.Background(), models.ImageRecord{ID: "x"}, models.Embedding{1.0})
+		id, err := s.Upsert(context.Background(), models.ImageRecord{ID: "x"}, models.Embeddings{models.EncoderCLIP: {1.0}})
 		if id != "x" || err != nil {
 			t.Errorf("expected x and no error")
 		}
@@ -147,7 +147,7 @@ func TestQdrantStore_DataOperations(t *testing.T) {
 		}
 		s := &QdrantStore{points: mc}
 
-		_, err := s.Search(context.Background(), models.Embedding{1.0}, 42, map[string]string{"k": "v"})
+		_, err := s.Search(context.Background(), models.EncoderCLIP, models.Embedding{1.0}, 42, map[string]string{"k": "v"})
 		if err != nil {
 			t.Errorf("expected no err")
 		}
@@ -168,7 +168,7 @@ func TestQdrantStore_DataOperations(t *testing.T) {
 			getResp: &pb.GetResponse{Result: nil},
 		}
 		s := &QdrantStore{points: mc}
-		_, err := s.GetVector(context.Background(), "x")
+		_, err := s.GetVector(context.Background(), "x", models.EncoderCLIP)
 		if err == nil {
 			t.Errorf("expected error for missing point")
 		}
@@ -177,11 +177,13 @@ func TestQdrantStore_DataOperations(t *testing.T) {
 	t.Run("GetVector success", func(t *testing.T) {
 		mc := &mockPointsClient{
 			getResp: &pb.GetResponse{Result: []*pb.RetrievedPoint{
-				{Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vector{Vector: &pb.Vector{Data: []float32{4.2}}}}},
+				{Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vectors{Vectors: &pb.NamedVectors{Vectors: map[string]*pb.Vector{
+					string(models.EncoderCLIP): {Data: []float32{4.2}},
+				}}}}},
 			}},
 		}
 		s := &QdrantStore{points: mc}
-		vec, err := s.GetVector(context.Background(), "x")
+		vec, err := s.GetVector(context.Background(), "x", models.EncoderCLIP)
 		if err != nil || vec[0] != 4.2 {
 			t.Errorf("expected success with 4.2")
 		}
