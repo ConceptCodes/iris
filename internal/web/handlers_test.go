@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"testing"
 
@@ -155,11 +157,16 @@ func TestRelatedImages(t *testing.T) {
 }
 
 func TestReverseImageSearch(t *testing.T) {
-	createMultipartRequest := func() (*http.Request, error) {
+	createMultipartRequest := func(fileContentType string, filename string) (*http.Request, error) {
 		var b bytes.Buffer
 		mw := multipart.NewWriter(&b)
-		fw, _ := mw.CreateFormFile("image", "test.png")
-		fw.Write([]byte("fake image data"))
+		partHeader := textproto.MIMEHeader{}
+		partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="%s"`, filename))
+		if fileContentType != "" {
+			partHeader.Set("Content-Type", fileContentType)
+		}
+		fw, _ := mw.CreatePart(partHeader)
+		_, _ = fw.Write([]byte("fake image data"))
 		mw.Close()
 		req := httptest.NewRequest("POST", "/search/reverse", &b)
 		req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -178,7 +185,7 @@ func TestReverseImageSearch(t *testing.T) {
 	})
 
 	t.Run("engine error", func(t *testing.T) {
-		req, _ := createMultipartRequest()
+		req, _ := createMultipartRequest("image/png", "test.png")
 		h := NewHandlers(&mockSearchEngine{err: errors.New("fail")})
 		w := httptest.NewRecorder()
 		h.ReverseImageSearch(w, req)
@@ -188,7 +195,7 @@ func TestReverseImageSearch(t *testing.T) {
 	})
 
 	t.Run("success redirect", func(t *testing.T) {
-		req, _ := createMultipartRequest()
+		req, _ := createMultipartRequest("image/png", "test.png")
 		h := NewHandlers(&mockSearchEngine{res: []models.SearchResult{{Score: 0.99}}})
 		w := httptest.NewRecorder()
 		h.ReverseImageSearch(w, req)
@@ -198,13 +205,23 @@ func TestReverseImageSearch(t *testing.T) {
 	})
 
 	t.Run("success htmx grid", func(t *testing.T) {
-		req, _ := createMultipartRequest()
+		req, _ := createMultipartRequest("image/png", "test.png")
 		req.Header.Set("HX-Request", "true")
 		h := NewHandlers(&mockSearchEngine{res: []models.SearchResult{{Score: 0.99}}})
 		w := httptest.NewRecorder()
 		h.ReverseImageSearch(w, req)
 		if w.Code != http.StatusOK {
 			t.Errorf("expected 200")
+		}
+	})
+
+	t.Run("unsupported image type", func(t *testing.T) {
+		req, _ := createMultipartRequest("image/heic", "test.heic")
+		h := NewHandlers(&mockSearchEngine{})
+		w := httptest.NewRecorder()
+		h.ReverseImageSearch(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400")
 		}
 	})
 }

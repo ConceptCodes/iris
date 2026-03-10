@@ -1,8 +1,10 @@
 package web
 
 import (
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/a-h/templ"
 	"iris/internal/constants"
@@ -16,6 +18,15 @@ type Handlers struct {
 	engine search.Engine
 }
 
+var supportedUploadMIMETypes = map[string]struct{}{
+	constants.MIMETypeJPEG: {},
+	constants.MIMETypePNG:  {},
+	constants.MIMETypeWEBP: {},
+	constants.MIMETypeGIF:  {},
+	constants.MIMETypeBMP:  {},
+	constants.MIMETypeTIFF: {},
+}
+
 func NewHandlers(engine search.Engine) *Handlers {
 	return &Handlers{engine: engine}
 }
@@ -25,7 +36,11 @@ func (h *Handlers) LandingPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) SearchResults(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	filterType := r.URL.Query().Get("type")
 	encoder := models.NormalizeEncoder(models.Encoder(r.URL.Query().Get("encoder")))
 	pageStr := r.URL.Query().Get("page")
@@ -111,8 +126,33 @@ func (h *Handlers) ReverseImageSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	buf := make([]byte, header.Size)
-	if _, err := file.Read(buf); err != nil {
+
+	contentType := header.Header.Get(constants.HeaderContentType)
+	if contentType == "" {
+		sniff := make([]byte, 512)
+		n, _ := io.ReadFull(file, sniff)
+		contentType = http.DetectContentType(sniff[:n])
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			http.Error(w, constants.MsgFailedToReadFile, http.StatusInternalServerError)
+			return
+		}
+	}
+	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if _, ok := supportedUploadMIMETypes[contentType]; !ok {
+		http.Error(w, "unsupported image type: use JPG, PNG, WebP, GIF, BMP, or TIFF", http.StatusBadRequest)
+		return
+	}
+
+	buf, err := io.ReadAll(io.LimitReader(file, constants.MaxImageSize+1))
+	if err != nil {
+		http.Error(w, constants.MsgFailedToReadFile, http.StatusInternalServerError)
+		return
+	}
+	if len(buf) > constants.MaxImageSize {
+		http.Error(w, constants.MessageFileTooLarge, http.StatusBadRequest)
+		return
+	}
+	if len(buf) == 0 {
 		http.Error(w, constants.MsgFailedToReadFile, http.StatusInternalServerError)
 		return
 	}

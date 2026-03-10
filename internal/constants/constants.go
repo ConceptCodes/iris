@@ -90,6 +90,12 @@ const (
 const (
 	MIMETypeJSON        = "application/json"
 	MIMETypeImagePrefix = "image/"
+	MIMETypeJPEG        = "image/jpeg"
+	MIMETypePNG         = "image/png"
+	MIMETypeWEBP        = "image/webp"
+	MIMETypeGIF         = "image/gif"
+	MIMETypeBMP         = "image/bmp"
+	MIMETypeTIFF        = "image/tiff"
 )
 
 // Timeouts and Durations

@@ -90,7 +90,7 @@ func TestRouterEndpoints(t *testing.T) {
 		path   string
 		expect int
 	}{
-		{"GET", "/search", http.StatusOK},
+		{"GET", "/search", http.StatusSeeOther},
 		{"GET", "/image/123", http.StatusNotFound}, // no results -> 404
 		{"GET", "/image/123/related", http.StatusOK},
 	}
