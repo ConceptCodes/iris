@@ -11,8 +11,8 @@ import (
 
 	"iris/config"
 	"iris/internal/api"
-	"iris/internal/clip"
 	"iris/internal/constants"
+	"iris/internal/encoder"
 	"iris/internal/search"
 	"iris/internal/store"
 	"iris/internal/tracing"
@@ -24,7 +24,7 @@ func main() {
 
 	cfg := config.LoadServer()
 
-	slog.Info("starting server", "clip_addr", cfg.ClipAddr, "qdrant_addr", cfg.QdrantAddr, "dim", cfg.ClipDim, "asset_dir", cfg.AssetDir, "otel_enabled", cfg.OtelEnabled)
+	slog.Info("starting server", "clip_addr", cfg.ClipAddr, "siglip2_addr", cfg.SigLIP2Addr, "qdrant_addr", cfg.QdrantAddr, "encoders", cfg.EnabledEncoders(), "asset_dir", cfg.AssetDir, "otel_enabled", cfg.OtelEnabled)
 
 	// Initialize OpenTelemetry tracer if enabled
 	var otelShutdown func()
@@ -40,20 +40,20 @@ func main() {
 		}
 	}
 
-	clipClient, err := clip.NewClient(cfg.ClipAddr)
+	encoderRegistry, cleanupEncoders, err := encoder.NewRegistryFromConfig(cfg.Shared)
 	if err != nil {
-		slog.Error("failed to create clip client", "error", err)
+		slog.Error("failed to create encoder registry", "error", err)
 		os.Exit(1)
 	}
-	defer clipClient.Close()
-	qdrantStore, err := store.NewQdrantStore(cfg.QdrantAddr, cfg.ClipDim, 3*time.Second)
+	defer cleanupEncoders()
+	qdrantStore, err := store.NewQdrantStoreWithEncoders(cfg.QdrantAddr, cfg.EncoderDims(), 3*time.Second)
 	if err != nil {
 		slog.Error("failed to connect to qdrant, search will be unavailable", "error", err)
 	} else {
 		defer qdrantStore.Close()
 	}
 
-	engine := search.NewEngine(clipClient, qdrantStore)
+	engine := search.NewEngine(encoderRegistry, qdrantStore)
 	crawlService, jobStore, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN)
 	if err != nil {
 		slog.Error("failed to initialize crawl service", "error", err)

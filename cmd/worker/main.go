@@ -20,8 +20,8 @@ import (
 
 	"iris/config"
 	"iris/internal/assets"
-	"iris/internal/clip"
 	"iris/internal/crawl"
+	"iris/internal/encoder"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
 	"iris/internal/metrics"
@@ -199,18 +199,18 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	}
 	defer crawlStore.Close()
 
-	clipClient, err := clip.NewClient(cfg.ClipAddr)
+	encoderRegistry, cleanupEncoders, err := encoder.NewRegistryFromConfig(cfg.Shared)
 	if err != nil {
-		return fmt.Errorf("create clip client: %w", err)
+		return fmt.Errorf("create encoder registry: %w", err)
 	}
-	defer clipClient.Close()
-	qdrantStore, err := store.NewQdrantStore(cfg.QdrantAddr, cfg.ClipDim, 15*time.Second)
+	defer cleanupEncoders()
+	qdrantStore, err := store.NewQdrantStoreWithEncoders(cfg.QdrantAddr, cfg.EncoderDims(), 15*time.Second)
 	if err != nil {
 		return err
 	}
 	defer qdrantStore.Close()
 
-	engine := search.NewEngine(clipClient, qdrantStore)
+	engine := search.NewEngine(encoderRegistry, qdrantStore)
 	assetStore, err := assets.NewStoreFromSettings(ctx, assets.Settings{
 		Backend:  cfg.AssetBackend,
 		LocalDir: cfg.AssetDir,

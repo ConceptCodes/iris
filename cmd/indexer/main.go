@@ -15,7 +15,7 @@ import (
 
 	"iris/config"
 	"iris/internal/assets"
-	"iris/internal/clip"
+	"iris/internal/encoder"
 	"iris/internal/indexing"
 	"iris/internal/search"
 	"iris/internal/store"
@@ -49,20 +49,20 @@ func main() {
 
 	slog.Info("starting indexer", "mode", *mode, "input", *input, "concurrency", cfg.Concurrency, "asset_dir", cfg.AssetDir)
 
-	clipClient, err := clip.NewClient(cfg.ClipAddr)
+	encoderRegistry, cleanupEncoders, err := encoder.NewRegistryFromConfig(cfg.Shared)
 	if err != nil {
-		slog.Error("failed to create clip client", "error", err)
+		slog.Error("failed to create encoder registry", "error", err)
 		os.Exit(1)
 	}
-	defer clipClient.Close()
-	qdrantStore, err := store.NewQdrantStore(cfg.QdrantAddr, cfg.ClipDim, 15*time.Second)
+	defer cleanupEncoders()
+	qdrantStore, err := store.NewQdrantStoreWithEncoders(cfg.QdrantAddr, cfg.EncoderDims(), 15*time.Second)
 	if err != nil {
 		slog.Error("failed to connect to qdrant", "error", err)
 		os.Exit(1)
 	}
 	defer qdrantStore.Close()
 
-	engine := search.NewEngine(clipClient, qdrantStore)
+	engine := search.NewEngine(encoderRegistry, qdrantStore)
 	assetStore, err := assets.NewStoreFromSettings(context.Background(), assets.Settings{
 		Backend:  cfg.AssetBackend,
 		LocalDir: cfg.AssetDir,
