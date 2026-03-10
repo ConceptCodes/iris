@@ -32,7 +32,8 @@ curl -X POST http://localhost:8080/search/text \
   -d '{
     "query": "a golden retriever on a beach",
     "top_k": 10,
-    "filters": { "meta_category": "pets" }
+    "filters": { "meta_category": "pets" },
+    "encoder": "siglip2"
   }'
 ```
 
@@ -41,7 +42,8 @@ curl -X POST http://localhost:8080/search/text \
 ```bash
 curl -X POST http://localhost:8080/search/image \
   -F image=@/path/to/query.jpg \
-  -F top_k=10
+  -F top_k=10 \
+  -F encoder=siglip2
 ```
 
 ### Reverse image search by URL
@@ -49,8 +51,17 @@ curl -X POST http://localhost:8080/search/image \
 ```bash
 curl -X POST http://localhost:8080/search/image/url \
   -H 'Content-Type: application/json' \
-  -d '{ "url": "https://example.com/query.jpg", "top_k": 10 }'
+  -d '{ "url": "https://example.com/query.jpg", "top_k": 10, "encoder": "siglip2" }'
 ```
+
+### Encoder Selection
+
+Search requests can optionally specify an encoder:
+
+- `clip`
+- `siglip2`
+
+If omitted, the server uses `DEFAULT_SEARCH_ENCODER`.
 
 ## Admin Crawl APIs
 

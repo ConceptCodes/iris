@@ -5,7 +5,8 @@
 - **Text-to-Image Search**: Find images using natural language queries.
 - **Reverse Image Search**: Find visually similar images via upload or URL.
 - **Smart Indexing**: Crawl remote URLs, domains, sitemaps, or local directories.
-- **High Performance**: Powered by a Python CLIP gRPC service and Qdrant vector database.
+- **Multi-Encoder Retrieval**: Index with multiple vision encoders and select the encoder used at search time.
+- **High Performance**: Powered by Python encoder sidecars and Qdrant vector database.
 
 ## Architecture
 
@@ -24,8 +25,8 @@
                     gRPC                gRPC
                        │                   │
              ┌─────────▼───────┐   ┌───────▼─────────┐
-             │  Python CLIP    │   │    Qdrant       │
-             │  clip_service   │   │   vector DB     │
+             │ Python Encoders │   │    Qdrant       │
+             │ CLIP + SigLIP2  │   │   vector DB     │
              └─────────────────┘   └─────────────────┘
 
         ┌──────────────────────────────────────────────┐
@@ -57,17 +58,25 @@ Visit [http://localhost:8080](http://localhost:8080) to use the UI.
 | `server` | 8080 | Main API and Web UI |
 | `qdrant` | 6333 | Vector Database |
 | `clip` | 8001 | CLIP Embedding gRPC Service |
+| `siglip2` | 8002 | SigLIP2 Embedding gRPC Service |
 | `postgres` | 5432 | Worker Job Store |
 | `grafana` | 3000 | Observability Dashboard |
 
-## CLIP Transport
+## Encoder Transport
 
-The Go services talk to `clip_service` over gRPC on `CLIP_ADDR`.
+The Go services talk to encoder sidecars over gRPC.
 
-- Default local address: `localhost:8001`
-- Docker Compose address: `clip:8001`
-- Health checks use the standard gRPC health service for `clip.v1.ClipService`
-- The protobuf contract lives at `proto/clip/v1/clip.proto`
+- CLIP address: `CLIP_ADDR` (default `localhost:8001`)
+- SigLIP2 address: `SIGLIP2_ADDR` (optional, no default)
+- Default search encoder: `DEFAULT_SEARCH_ENCODER` (default `clip`)
+- Qdrant stores one named vector per encoder for each image record
+
+Current encoder names:
+
+- `clip`
+- `siglip2`
+
+The encoder protobuf contract currently lives at `proto/clip/v1/clip.proto` and is shared by both sidecars.
 
 If you change the protobuf contract, regenerate stubs with:
 
@@ -86,6 +95,7 @@ This updates:
 - **1M – 50M**: Qdrant with on-disk payload + HNSW.
 - **High ingest volume**: Move worker jobs to Postgres and split workloads.
 - **GPU available**: Run CLIP sidecar on CUDA for faster embeddings.
+- **Multiple encoders**: Reindex after enabling a new encoder so all stored records receive every named vector.
 
 ## Project Structure
 
