@@ -44,13 +44,13 @@ func (m *mockSearchEngine) ReindexFromBytes(ctx context.Context, imageBytes []by
 func (m *mockSearchEngine) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
 	return m.res, m.err
 }
-func (m *mockSearchEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (m *mockSearchEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error) {
 	return m.res, m.err
 }
-func (m *mockSearchEngine) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (m *mockSearchEngine) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error) {
 	return m.res, m.err
 }
-func (m *mockSearchEngine) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
+func (m *mockSearchEngine) GetSimilar(ctx context.Context, id string, topK int, enc models.Encoder) ([]models.SearchResult, error) {
 	return m.res, m.err
 }
 

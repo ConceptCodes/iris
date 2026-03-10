@@ -27,6 +27,7 @@ func (h *Handlers) LandingPage(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) SearchResults(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	filterType := r.URL.Query().Get("type")
+	encoder := models.NormalizeEncoder(models.Encoder(r.URL.Query().Get("encoder")))
 	pageStr := r.URL.Query().Get("page")
 	page, _ := strconv.Atoi(pageStr)
 	if page < 1 {
@@ -43,6 +44,7 @@ func (h *Handlers) SearchResults(w http.ResponseWriter, r *http.Request) {
 		Query:   query,
 		TopK:    topK,
 		Filters: filters,
+		Encoder: encoder,
 	})
 	if err != nil {
 		if r.Header.Get(constants.HeaderHXRequest) == "true" {
@@ -70,7 +72,8 @@ func (h *Handlers) SearchResults(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) ImageDetail(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	results, err := h.engine.GetSimilar(r.Context(), id, 2)
+	encoder := models.NormalizeEncoder(models.Encoder(r.URL.Query().Get("encoder")))
+	results, err := h.engine.GetSimilar(r.Context(), id, 2, encoder)
 	if err != nil || len(results) == 0 {
 		http.Error(w, constants.MessageNotFound, http.StatusNotFound)
 		return
@@ -80,7 +83,8 @@ func (h *Handlers) ImageDetail(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) RelatedImages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	results, err := h.engine.GetSimilar(r.Context(), id, 10)
+	encoder := models.NormalizeEncoder(models.Encoder(r.URL.Query().Get("encoder")))
+	results, err := h.engine.GetSimilar(r.Context(), id, 10, encoder)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -112,7 +116,8 @@ func (h *Handlers) ReverseImageSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, constants.MsgFailedToReadFile, http.StatusInternalServerError)
 		return
 	}
-	results, err := h.engine.SearchByImageBytes(r.Context(), buf, constants.DefaultLimit40, nil)
+	encoder := models.NormalizeEncoder(models.Encoder(r.FormValue("encoder")))
+	results, err := h.engine.SearchByImageBytes(r.Context(), buf, constants.DefaultLimit40, nil, encoder)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -126,6 +131,7 @@ func (h *Handlers) ReverseImageSearch(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) ReverseImageSearchURL(w http.ResponseWriter, r *http.Request) {
 	imageURL := r.FormValue("url")
+	encoder := models.NormalizeEncoder(models.Encoder(r.FormValue("encoder")))
 	if imageURL == "" {
 		http.Error(w, constants.ErrorMsgURLRequired, http.StatusBadRequest)
 		return
@@ -137,7 +143,7 @@ func (h *Handlers) ReverseImageSearchURL(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	results, err := h.engine.SearchByImageURL(r.Context(), imageURL, constants.DefaultLimit40, nil)
+	results, err := h.engine.SearchByImageURL(r.Context(), imageURL, constants.DefaultLimit40, nil, encoder)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
