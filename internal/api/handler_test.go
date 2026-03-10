@@ -42,15 +42,15 @@ func (s *stubEngine) SearchByText(ctx context.Context, req models.TextSearchRequ
 	return nil, nil
 }
 
-func (s *stubEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (s *stubEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error) {
 	return nil, nil
 }
 
-func (s *stubEngine) SearchByImageURL(ctx context.Context, imageURL string, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (s *stubEngine) SearchByImageURL(ctx context.Context, imageURL string, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error) {
 	return nil, nil
 }
 
-func (s *stubEngine) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
+func (s *stubEngine) GetSimilar(ctx context.Context, id string, topK int, enc models.Encoder) ([]models.SearchResult, error) {
 	return nil, nil
 }
 

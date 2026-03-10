@@ -32,15 +32,15 @@ func (m *mockSearchEngine) SearchByText(ctx context.Context, req models.TextSear
 	return nil, nil
 }
 
-func (m *mockSearchEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (m *mockSearchEngine) SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error) {
 	return nil, nil
 }
 
-func (m *mockSearchEngine) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string) ([]models.SearchResult, error) {
+func (m *mockSearchEngine) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error) {
 	return nil, nil
 }
 
-func (m *mockSearchEngine) GetSimilar(ctx context.Context, id string, topK int) ([]models.SearchResult, error) {
+func (m *mockSearchEngine) GetSimilar(ctx context.Context, id string, topK int, enc models.Encoder) ([]models.SearchResult, error) {
 	return nil, nil
 }
 

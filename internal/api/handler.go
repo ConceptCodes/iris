@@ -165,6 +165,7 @@ func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
 		Results: results,
 		Query:   req.Query,
 		TookMs:  time.Since(start).Milliseconds(),
+		Encoder: models.NormalizeEncoder(req.Encoder),
 	})
 }
 
@@ -202,8 +203,9 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 	}
 	topK := parseIntFormValue(r.FormValue("top_k"), 0)
 	filters := parseFilters(r.FormValue("filters"))
+	selectedEncoder := models.NormalizeEncoder(models.Encoder(r.FormValue("encoder")))
 	start := time.Now()
-	results, err := h.engine.SearchByImageBytes(r.Context(), buf, topK, filters)
+	results, err := h.engine.SearchByImageBytes(r.Context(), buf, topK, filters, selectedEncoder)
 	if err != nil {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
@@ -216,6 +218,7 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.ImageSearchResponse{
 		Results: results,
 		TookMs:  time.Since(start).Milliseconds(),
+		Encoder: selectedEncoder,
 	})
 }
 
@@ -228,6 +231,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 		URL     string            `json:"url"`
 		TopK    int               `json:"top_k"`
 		Filters map[string]string `json:"filters"`
+		Encoder models.Encoder    `json:"encoder,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if h.metrics != nil {
@@ -246,7 +250,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	results, err := h.engine.SearchByImageURL(r.Context(), req.URL, req.TopK, req.Filters)
+	results, err := h.engine.SearchByImageURL(r.Context(), req.URL, req.TopK, req.Filters, req.Encoder)
 	if err != nil {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
@@ -260,6 +264,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 		Results: results,
 		Query:   req.URL,
 		TookMs:  time.Since(start).Milliseconds(),
+		Encoder: models.NormalizeEncoder(req.Encoder),
 	})
 }
 
