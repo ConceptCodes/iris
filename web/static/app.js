@@ -47,27 +47,15 @@ function closeUploadModal() {
 function showUploadTab() {
   document.getElementById("upload-content").classList.remove("hidden");
   document.getElementById("url-content").classList.add("hidden");
-  document
-    .getElementById("tab-upload")
-    .classList.add("text-[#1a73e8]", "border-b-2", "border-[#1a73e8]");
-  document.getElementById("tab-upload").classList.remove("text-gray-500");
-  document
-    .getElementById("tab-url")
-    .classList.remove("text-[#1a73e8]", "border-b-2", "border-[#1a73e8]");
-  document.getElementById("tab-url").classList.add("text-gray-500");
+  document.getElementById("tab-upload").classList.add("active");
+  document.getElementById("tab-url").classList.remove("active");
 }
 
 function showUrlTab() {
   document.getElementById("url-content").classList.remove("hidden");
   document.getElementById("upload-content").classList.add("hidden");
-  document
-    .getElementById("tab-url")
-    .classList.add("text-[#1a73e8]", "border-b-2", "border-[#1a73e8]");
-  document.getElementById("tab-url").classList.remove("text-gray-500");
-  document
-    .getElementById("tab-upload")
-    .classList.remove("text-[#1a73e8]", "border-b-2", "border-[#1a73e8]");
-  document.getElementById("tab-upload").classList.add("text-gray-500");
+  document.getElementById("tab-url").classList.add("active");
+  document.getElementById("tab-upload").classList.remove("active");
 }
 
 function handleFileSelect(input) {
@@ -78,7 +66,7 @@ function handleFileSelect(input) {
       dropZoneContent.innerHTML =
         '<img src="' +
         e.target.result +
-        '" class="max-h-48 mx-auto rounded mb-3"/><p class="text-gray-600">Uploading...</p>';
+        '" class="max-h-48 mx-auto rounded mb-3"/><p class="text-gray-600 dark:text-gray-300">Uploading...</p>';
       document
         .getElementById("upload-form")
         .dispatchEvent(new Event("submit", { bubbles: true }));

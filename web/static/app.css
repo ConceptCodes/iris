@@ -62,3 +62,56 @@
 .htmx-indicator {
   display: none;
 }
+
+/* Custom Scrollbar for Detail Panel */
+#detail-panel-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+#detail-panel-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#detail-panel-container::-webkit-scrollbar-thumb {
+  background: #dfe1e5;
+  border-radius: 10px;
+}
+
+.dark #detail-panel-container::-webkit-scrollbar-thumb {
+  background: #3c4043;
+}
+
+#detail-panel-container::-webkit-scrollbar-thumb:hover {
+  background: #dadce0;
+}
+
+.dark #detail-panel-container::-webkit-scrollbar-thumb:hover {
+  background: #5f6368;
+}
+
+/* Tab Styles */
+#upload-modal button.active {
+  color: #1a73e8;
+  border-bottom: 2px solid #1a73e8;
+}
+
+.dark #upload-modal button.active {
+  color: #8ab4f8;
+  border-bottom: 2px solid #8ab4f8;
+}
+
+#upload-modal button:not(.active) {
+  color: #5f6368;
+}
+
+.dark #upload-modal button:not(.active) {
+  color: #9aa0a6;
+}
+
+#drop-zone.border-iris-blue {
+  border-color: #1a73e8 !important;
+}
+
+.dark #drop-zone.border-iris-blue {
+  border-color: #8ab4f8 !important;
+}

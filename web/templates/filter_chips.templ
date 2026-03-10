@@ -16,7 +16,7 @@ var filterChips = []struct {
 
 func chipClass(active bool) string {
 	if active {
-		return "rounded-full px-3 py-1 text-sm bg-gray-800 text-white"
+		return "rounded-full px-3 py-1 text-sm bg-gray-800 dark:bg-gray-100 text-white dark:text-gray-900 font-medium"
 	}
 	return "rounded-full px-3 py-1 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
 }

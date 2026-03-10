@@ -24,29 +24,21 @@ templ DetailPanel(result models.SearchResult) {
 				href={ imageURL(result.Record) }
 				target="_blank"
 				rel="noopener noreferrer"
-				class="flex-1 px-4 py-2 border border-[#1a73e8] text-[#1a73e8] text-sm font-medium rounded-full text-center hover:bg-blue-50 transition-colors"
+				class="flex-1 px-4 py-2 bg-[#1a73e8] dark:bg-[#8ab4f8] text-white dark:text-gray-900 text-sm font-medium rounded-full text-center hover:bg-[#1557b0] dark:hover:bg-[#a1c4fd] transition-colors"
 			>
 				Visit
-			</a>
-			<a
-				href={ imageURL(result.Record) }
-				target="_blank"
-				rel="noopener noreferrer"
-				class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 dark:text-gray-100 text-sm font-medium rounded-full text-center hover:bg-gray-200 transition-colors"
-			>
-				View full size
 			</a>
 		</div>
 		<div class="border-t border-gray-200 dark:border-gray-700 pt-4">
 			if result.Record.Filename != "" {
 				<h3 class="font-medium text-gray-900 dark:text-white mb-1 truncate">{ result.Record.Filename }</h3>
 			}
-			<p class="text-sm text-gray-500 dark:text-gray-400 dark:text-gray-300 truncate mb-2">{ imageURL(result.Record) }</p>
+			<p class="text-sm text-gray-500 dark:text-gray-400 truncate mb-2">{ imageURL(result.Record) }</p>
 			<p class="text-sm text-gray-600 dark:text-gray-300 mb-2">Score: { fmt.Sprintf("%.2f", result.Score) }</p>
 			if len(result.Record.Tags) > 0 {
 				<div class="flex flex-wrap gap-1 mb-2">
 					for _, tag := range result.Record.Tags {
-						<span class="px-2 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 dark:text-gray-300 text-xs rounded">{ tag }</span>
+						<span class="px-2 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-xs rounded">{ tag }</span>
 					}
 				</div>
 			}
