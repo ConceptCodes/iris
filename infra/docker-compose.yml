@@ -52,6 +52,27 @@ services:
       timeout: 5s
       retries: 10
 
+  siglip2:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: siglip2
+    env_file:
+      - .env.docker
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import grpc; from grpc_health.v1 import health_pb2, health_pb2_grpc; channel = grpc.insecure_channel('localhost:8002'); response = health_pb2_grpc.HealthStub(channel).Check(health_pb2.HealthCheckRequest(service='clip.v1.ClipService')); raise SystemExit(0 if response.status == health_pb2.HealthCheckResponse.SERVING else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   # ── Jaeger distributed tracing ────────────────────────────────────────────
   jaeger:
     image: jaegertracing/all-in-one:1.53
