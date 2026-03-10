@@ -32,6 +32,12 @@ def normalize_features(features):
     return features / features.norm(dim=-1, keepdim=True)
 
 
+def pooled_features(output):
+    if hasattr(output, "pooler_output") and output.pooler_output is not None:
+        return output.pooler_output
+    return output
+
+
 class SigLIP2Service(clip_pb2_grpc.ClipServiceServicer):
     def __init__(self, model_name: str):
         self.device, self.device_name = get_device()
@@ -46,7 +52,7 @@ class SigLIP2Service(clip_pb2_grpc.ClipServiceServicer):
         with torch.no_grad():
             inputs = self.processor(text=[request.text], padding=True, return_tensors="pt")
             inputs = {key: value.to(self.device) for key, value in inputs.items()}
-            text_features = normalize_features(self.model.get_text_features(**inputs))
+            text_features = normalize_features(pooled_features(self.model.get_text_features(**inputs)))
             embedding = text_features[0].cpu().tolist()
         return clip_pb2.EmbedResponse(embedding=embedding, dim=len(embedding))
 
@@ -77,7 +83,7 @@ class SigLIP2Service(clip_pb2_grpc.ClipServiceServicer):
         with torch.no_grad():
             inputs = self.processor(images=image, return_tensors="pt")
             inputs = {key: value.to(self.device) for key, value in inputs.items()}
-            image_features = normalize_features(self.model.get_image_features(**inputs))
+            image_features = normalize_features(pooled_features(self.model.get_image_features(**inputs)))
             embedding = image_features[0].cpu().tolist()
         return clip_pb2.EmbedResponse(embedding=embedding, dim=len(embedding))
 
