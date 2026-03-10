@@ -61,7 +61,7 @@ COPY clip_service/main.py .
 COPY clip_service/clip /app/clip
 
 # Environment variables
-ENV MODEL=CLIP-ViT-B-32-laion2B-s34B-b79K
+ENV CLIP_MODEL=CLIP-ViT-B-32-laion2B-s34B-b79K
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8001
@@ -69,7 +69,7 @@ EXPOSE 8001
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import grpc; from grpc_health.v1 import health_pb2, health_pb2_grpc; channel = grpc.insecure_channel('localhost:8001'); response = health_pb2_grpc.HealthStub(channel).Check(health_pb2.HealthCheckRequest(service='clip.v1.ClipService')); raise SystemExit(0 if response.status == health_pb2.HealthCheckResponse.SERVING else 1)" || exit 1
 
-ENTRYPOINT ["sh", "-c", "python main.py --model $MODEL --host 0.0.0.0 --port 8001"]
+ENTRYPOINT ["sh", "-c", "python main.py --model $CLIP_MODEL --host 0.0.0.0 --port 8001"]
 
 # ── SigLIP2 service runtime ───────────────────────────────────────────────────
 FROM python:${PYTHON_VERSION}-slim AS siglip2
@@ -91,7 +91,7 @@ RUN python -c "from transformers import AutoModel, AutoProcessor; \
 COPY siglip_service/main.py .
 COPY clip_service/clip /app/clip
 
-ENV MODEL=google/siglip2-base-patch16-224
+ENV SIGLIP2_MODEL=google/siglip2-base-patch16-224
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8002
@@ -99,4 +99,4 @@ EXPOSE 8002
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import grpc; from grpc_health.v1 import health_pb2, health_pb2_grpc; channel = grpc.insecure_channel('localhost:8002'); response = health_pb2_grpc.HealthStub(channel).Check(health_pb2.HealthCheckRequest(service='clip.v1.ClipService')); raise SystemExit(0 if response.status == health_pb2.HealthCheckResponse.SERVING else 1)" || exit 1
 
-ENTRYPOINT ["sh", "-c", "python main.py --model $MODEL --host 0.0.0.0 --port 8002"]
+ENTRYPOINT ["sh", "-c", "python main.py --model $SIGLIP2_MODEL --host 0.0.0.0 --port 8002"]

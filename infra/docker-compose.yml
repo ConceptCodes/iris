@@ -101,6 +101,8 @@ services:
         condition: service_started
       clip:
         condition: service_healthy
+      siglip2:
+        condition: service_healthy
 
   worker:
     build:
@@ -119,6 +121,8 @@ services:
       qdrant:
         condition: service_started
       clip:
+        condition: service_healthy
+      siglip2:
         condition: service_healthy
 
   # ── Prometheus metrics collector ───────────────────────────────────────────
