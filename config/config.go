@@ -5,12 +5,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"iris/pkg/models"
 )
 
 const (
 	defaultClipAddr             = "localhost:8001"
 	defaultQdrantAddr           = "localhost:6334"
 	defaultClipDim              = 512
+	defaultSigLIP2Addr          = ""
+	defaultSigLIP2Dim           = 0
+	defaultSearchEncoder        = "clip"
 	defaultHTTPAddr             = ":8080"
 	defaultConcurrency          = 4
 	defaultAssetDir             = "./data/assets"
@@ -46,6 +51,9 @@ type Shared struct {
 	ClipAddr                 string
 	QdrantAddr               string
 	ClipDim                  int
+	SigLIP2Addr              string
+	SigLIP2Dim               int
+	DefaultSearchEncoder     models.Encoder
 	AssetDir                 string
 	AssetBackend             string
 	AssetBucket              string
@@ -60,6 +68,24 @@ type Shared struct {
 	OtelEnabled              bool
 	OtelEndpoint             string
 	SSRFAllowPrivateNetworks bool
+}
+
+func (s Shared) EncoderDims() map[models.Encoder]int {
+	dims := map[models.Encoder]int{
+		models.EncoderCLIP: s.ClipDim,
+	}
+	if s.SigLIP2Addr != "" && s.SigLIP2Dim > 0 {
+		dims[models.EncoderSigLIP2] = s.SigLIP2Dim
+	}
+	return dims
+}
+
+func (s Shared) EnabledEncoders() []models.Encoder {
+	encoders := []models.Encoder{models.EncoderCLIP}
+	if s.SigLIP2Addr != "" && s.SigLIP2Dim > 0 {
+		encoders = append(encoders, models.EncoderSigLIP2)
+	}
+	return encoders
 }
 
 type Server struct {
@@ -217,6 +243,18 @@ func loadShared() Shared {
 			"CLIP_DIM",
 			defaultClipDim,
 		),
+		SigLIP2Addr: getEnv(
+			"SIGLIP2_ADDR",
+			defaultSigLIP2Addr,
+		),
+		SigLIP2Dim: getEnvInt(
+			"SIGLIP2_DIM",
+			defaultSigLIP2Dim,
+		),
+		DefaultSearchEncoder: models.NormalizeEncoder(models.Encoder(getEnv(
+			"DEFAULT_SEARCH_ENCODER",
+			defaultSearchEncoder,
+		))),
 		AssetDir: getEnv(
 			"ASSET_DIR",
 			defaultAssetDir,
