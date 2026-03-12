@@ -17,6 +17,7 @@ import (
 	"iris/internal/assets"
 	"iris/internal/encoder"
 	"iris/internal/indexing"
+	"iris/internal/metadata"
 	"iris/internal/search"
 	"iris/internal/store"
 	"iris/pkg/models"
@@ -82,7 +83,16 @@ func main() {
 		os.Exit(1)
 	}
 	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
-		AssetStore: assetStore,})
+		AssetStore: assetStore})
+	if enricher := metadata.NewComposite(
+		metadata.EXIFEnricher{},
+		metadata.NewClient(cfg.MetadataAddr, 45*time.Second),
+	); enricher != nil {
+		pipeline = indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
+			AssetStore: assetStore,
+			Enricher:   enricher,
+		})
+	}
 
 	var jobs []string
 	switch *mode {

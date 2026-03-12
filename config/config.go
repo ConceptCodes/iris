@@ -67,6 +67,7 @@ type Shared struct {
 	AssetPrefix              string
 	AssetPublicBase          string
 	AssetPathStyle           bool
+	MetadataAddr             string
 	OtelEnabled              bool
 	OtelEndpoint             string
 	SSRFAllowPrivateNetworks bool
@@ -328,6 +329,10 @@ func loadShared() Shared {
 		AssetPathStyle: getEnvBool(
 			"ASSET_S3_PATH_STYLE",
 			false,
+		),
+		MetadataAddr: getEnv(
+			"METADATA_ADDR",
+			"",
 		),
 		OtelEnabled: getEnvBool(
 			"OTEL_ENABLED",

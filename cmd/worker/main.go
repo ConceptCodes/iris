@@ -25,6 +25,7 @@ import (
 	"iris/internal/encoder"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
+	"iris/internal/metadata"
 	"iris/internal/metrics"
 	"iris/internal/search"
 	"iris/internal/ssrf"
@@ -249,6 +250,7 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	}
 	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
 		AssetStore:               assetStore,
+		Enricher:                 metadata.NewComposite(metadata.EXIFEnricher{}, metadata.NewClient(cfg.MetadataAddr, 45*time.Second)),
 		MaxFetchBytes:            cfg.MaxImageBytes,
 		FetchClient:              &http.Client{Timeout: cfg.FetchTimeout},
 		UserAgent:                cfg.UserAgent,

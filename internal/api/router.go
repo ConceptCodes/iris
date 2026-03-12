@@ -11,6 +11,7 @@ import (
 	"iris/internal/crawl"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
+	"iris/internal/metadata"
 	"iris/internal/metrics"
 	"iris/internal/search"
 	"iris/internal/web"
@@ -22,16 +23,17 @@ import (
 )
 
 type AssetsSettings struct {
-	Backend    string
-	Bucket     string
-	Region     string
-	Endpoint   string
-	AccessKey  string
-	SecretKey  string
-	SessionKey string
-	Prefix     string
-	PublicBase string
-	PathStyle  bool
+	Backend      string
+	Bucket       string
+	Region       string
+	Endpoint     string
+	AccessKey    string
+	SecretKey    string
+	SessionKey   string
+	Prefix       string
+	PublicBase   string
+	PathStyle    bool
+	MetadataAddr string
 }
 
 type AdminAuthSettings struct {
@@ -100,6 +102,10 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 	assetStore := buildAssetStore(assetsCfg)
 	indexer := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
 		AssetStore: assetStore,
+		Enricher: metadata.NewComposite(
+			metadata.EXIFEnricher{},
+			metadata.NewClient(assetsCfg.MetadataAddr, constants.HTTPTimeout60s),
+		),
 	})
 	if jobStore == nil {
 		jobStore = jobs.NewMemoryStore()

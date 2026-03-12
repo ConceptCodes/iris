@@ -12,6 +12,8 @@ build:
 proto:
   protoc --proto_path=proto --go_out=. --go_opt=module=iris --go-grpc_out=. --go-grpc_opt=module=iris proto/clip/v1/clip.proto
   PYTHONPATH=./.tmp-grpc-tools python3 -m grpc_tools.protoc --proto_path=proto --python_out=clip_service --grpc_python_out=clip_service proto/clip/v1/clip.proto
+  protoc --proto_path=proto --go_out=. --go_opt=module=iris --go-grpc_out=. --go-grpc_opt=module=iris proto/metadata/v1/metadata.proto
+  PYTHONPATH=./.tmp-grpc-tools python3 -m grpc_tools.protoc --proto_path=proto --python_out=metadata_service --grpc_python_out=metadata_service proto/metadata/v1/metadata.proto
 
 test:
   go test ./...

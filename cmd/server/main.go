@@ -61,16 +61,17 @@ func main() {
 		defer cleanup()
 	}
 	router := api.NewRouterWithAssetsAndAuth(engine, api.AssetsSettings{
-		Backend:    cfg.AssetBackend,
-		Bucket:     cfg.AssetBucket,
-		Region:     cfg.AssetRegion,
-		Endpoint:   cfg.AssetEndpoint,
-		AccessKey:  cfg.AssetAccessKey,
-		SecretKey:  cfg.AssetSecretKey,
-		SessionKey: cfg.AssetSessionKey,
-		Prefix:     cfg.AssetPrefix,
-		PublicBase: cfg.AssetPublicBase,
-		PathStyle:  cfg.AssetPathStyle,
+		Backend:      cfg.AssetBackend,
+		Bucket:       cfg.AssetBucket,
+		Region:       cfg.AssetRegion,
+		Endpoint:     cfg.AssetEndpoint,
+		AccessKey:    cfg.AssetAccessKey,
+		SecretKey:    cfg.AssetSecretKey,
+		SessionKey:   cfg.AssetSessionKey,
+		Prefix:       cfg.AssetPrefix,
+		PublicBase:   cfg.AssetPublicBase,
+		PathStyle:    cfg.AssetPathStyle,
+		MetadataAddr: cfg.MetadataAddr,
 	}, crawlService, api.AdminAuthSettings{
 		AdminAPIKey:     cfg.AdminAPIKey,
 		ReadOnlyAPIKeys: cfg.AdminReadOnlyAPIKeys,

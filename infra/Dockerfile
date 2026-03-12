@@ -100,3 +100,36 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import grpc; from grpc_health.v1 import health_pb2, health_pb2_grpc; channel = grpc.insecure_channel('localhost:8002'); response = health_pb2_grpc.HealthStub(channel).Check(health_pb2.HealthCheckRequest(service='clip.v1.ClipService')); raise SystemExit(0 if response.status == health_pb2.HealthCheckResponse.SERVING else 1)" || exit 1
 
 ENTRYPOINT ["sh", "-c", "python main.py --model $SIGLIP2_MODEL --host 0.0.0.0 --port 8002"]
+
+# ── Metadata service runtime ──────────────────────────────────────────────────
+FROM python:${PYTHON_VERSION}-slim AS metadata
+
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+
+WORKDIR /app
+
+COPY metadata_service/requirements.txt /app/metadata_service/requirements.txt
+
+RUN pip install --no-cache-dir \
+    -r metadata_service/requirements.txt && \
+    pip install --no-cache-dir torch --index-url ${TORCH_INDEX}
+
+RUN python -c "from transformers import BlipProcessor, BlipForConditionalGeneration; \
+    BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-base'); \
+    BlipForConditionalGeneration.from_pretrained('Salesforce/blip-image-captioning-base')"
+
+RUN python -c "import easyocr; easyocr.Reader(['en'], gpu=False)"
+
+COPY metadata_service/main.py /app/main.py
+COPY metadata_service/metadata /app/metadata
+
+ENV METADATA_CAPTION_MODEL=Salesforce/blip-image-captioning-base
+ENV METADATA_OCR_LANGS=en
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8003
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import grpc; from grpc_health.v1 import health_pb2, health_pb2_grpc; channel = grpc.insecure_channel('localhost:8003'); response = health_pb2_grpc.HealthStub(channel).Check(health_pb2.HealthCheckRequest(service='metadata.v1.MetadataService')); raise SystemExit(0 if response.status == health_pb2.HealthCheckResponse.SERVING else 1)" || exit 1
+
+ENTRYPOINT ["python", "main.py"]
