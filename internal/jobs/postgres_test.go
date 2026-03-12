@@ -4,10 +4,12 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"iris/config"
 )
 
 func TestNewPostgresStoreRequiresDSN(t *testing.T) {
-	store, err := NewPostgresStore(context.Background(), "")
+	store, err := NewPostgresStore(context.Background(), "", config.PostgresPool{})
 	if err == nil {
 		t.Fatalf("expected error for empty dsn")
 	}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"iris/config"
+
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -15,7 +17,7 @@ type PostgresStore struct {
 	db *sql.DB
 }
 
-func NewPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
+func NewPostgresStore(ctx context.Context, dsn string, pool config.PostgresPool) (*PostgresStore, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("job store dsn is required")
 	}
@@ -24,6 +26,7 @@ func NewPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
+	configurePostgresPool(db, pool)
 
 	store := &PostgresStore{db: db}
 	if err := store.ping(ctx); err != nil {
@@ -36,6 +39,13 @@ func NewPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
 	}
 
 	return store, nil
+}
+
+func configurePostgresPool(db *sql.DB, pool config.PostgresPool) {
+	db.SetMaxOpenConns(pool.MaxOpenConns)
+	db.SetMaxIdleConns(pool.MaxIdleConns)
+	db.SetConnMaxLifetime(pool.ConnMaxLifetime)
+	db.SetConnMaxIdleTime(pool.ConnMaxIdleTime)
 }
 
 func (s *PostgresStore) Enqueue(ctx context.Context, job Job) (Job, error) {
@@ -147,32 +157,45 @@ func (s *PostgresStore) MarkSucceeded(ctx context.Context, id string) error {
 }
 
 func (s *PostgresStore) MarkFailed(ctx context.Context, id string, failure error, retryAt time.Time) (Status, error) {
-	const selectQuery = `SELECT attempts, max_attempts FROM jobs WHERE id = $1`
-	var attempts, maxAttempts int
-	if err := s.db.QueryRowContext(ctx, selectQuery, id).Scan(&attempts, &maxAttempts); err != nil {
-		return "", fmt.Errorf("select failed job: %w", err)
-	}
-
-	status := StatusPending
-	if attempts >= maxAttempts {
-		status = StatusDeadLetter
-	}
-
-	_, err := s.db.ExecContext(
+	var status string
+	err := s.db.QueryRowContext(
 		ctx,
 		`UPDATE jobs
-		 SET status = $2, last_error = $3, available_at = $4, leased_until = NULL, updated_at = $5
-		 WHERE id = $1`,
+		 SET status = CASE WHEN attempts >= max_attempts THEN $2 ELSE $3 END,
+		     last_error = $4,
+		     available_at = $5,
+		     leased_until = NULL,
+		     updated_at = $6
+		 WHERE id = $1
+		 RETURNING status`,
 		id,
-		string(status),
+		string(StatusDeadLetter),
+		string(StatusPending),
 		failure.Error(),
 		retryAt,
 		time.Now().UTC(),
-	)
+	).Scan(&status)
 	if err != nil {
 		return "", fmt.Errorf("mark failed: %w", err)
 	}
-	return status, nil
+	return Status(status), nil
+}
+
+func (s *PostgresStore) MarkDeadLetter(ctx context.Context, id string, failure error) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE jobs
+		 SET status = $2, last_error = $3, leased_until = NULL, updated_at = $4
+		 WHERE id = $1`,
+		id,
+		string(StatusDeadLetter),
+		failure.Error(),
+		time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("mark dead letter: %w", err)
+	}
+	return nil
 }
 
 func (s *PostgresStore) Close() error {

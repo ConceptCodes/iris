@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"iris/config"
 )
 
 func requirePostgresBenchStore(b *testing.B) *PostgresStore {
@@ -17,7 +19,12 @@ func requirePostgresBenchStore(b *testing.B) *PostgresStore {
 		b.Skip("set JOB_STORE_BENCH_DSN to run Postgres job-store integration benchmarks")
 	}
 
-	store, err := NewPostgresStore(context.Background(), dsn)
+	store, err := NewPostgresStore(context.Background(), dsn, config.PostgresPool{
+		MaxOpenConns:    25,
+		MaxIdleConns:    5,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 2 * time.Minute,
+	})
 	if err != nil {
 		b.Fatalf("create postgres store: %v", err)
 	}

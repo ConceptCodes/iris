@@ -116,6 +116,24 @@ func (s *MemoryStore) MarkFailed(ctx context.Context, id string, err error, retr
 	return "", fmt.Errorf("job not found: %s", id)
 }
 
+func (s *MemoryStore) MarkDeadLetter(ctx context.Context, id string, err error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, job := range s.jobs {
+		if job.ID != id {
+			continue
+		}
+		job.Status = StatusDeadLetter
+		job.LastError = err.Error()
+		job.LeasedUntil = time.Time{}
+		job.UpdatedAt = time.Now().UTC()
+		s.jobs[index] = job
+		return nil
+	}
+	return fmt.Errorf("job not found: %s", id)
+}
+
 func (s *MemoryStore) Close() error {
 	return nil
 }
