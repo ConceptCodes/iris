@@ -19,6 +19,10 @@ func TestLoadServerDefaults(t *testing.T) {
 	t.Setenv("ASSET_S3_PATH_STYLE", "")
 	t.Setenv("JOB_BACKEND", "")
 	t.Setenv("JOB_STORE_DSN", "")
+	t.Setenv("POSTGRES_MAX_OPEN_CONNS", "")
+	t.Setenv("POSTGRES_MAX_IDLE_CONNS", "")
+	t.Setenv("POSTGRES_CONN_MAX_LIFETIME", "")
+	t.Setenv("POSTGRES_CONN_MAX_IDLE_TIME", "")
 	t.Setenv("ADMIN_API_KEY", "")
 	t.Setenv("ADMIN_READONLY_API_KEYS", "")
 
@@ -59,6 +63,18 @@ func TestLoadServerDefaults(t *testing.T) {
 	}
 	if cfg.JobStoreDSN != defaultJobStoreDSN {
 		t.Fatalf("expected default job store dsn, got %q", cfg.JobStoreDSN)
+	}
+	if cfg.PostgresPool.MaxOpenConns != defaultPostgresMaxOpenConns {
+		t.Fatalf("expected default max open conns, got %d", cfg.PostgresPool.MaxOpenConns)
+	}
+	if cfg.PostgresPool.MaxIdleConns != defaultPostgresMaxIdleConns {
+		t.Fatalf("expected default max idle conns, got %d", cfg.PostgresPool.MaxIdleConns)
+	}
+	if cfg.PostgresPool.ConnMaxLifetime != defaultPostgresConnMaxLife {
+		t.Fatalf("expected default conn max lifetime, got %s", cfg.PostgresPool.ConnMaxLifetime)
+	}
+	if cfg.PostgresPool.ConnMaxIdleTime != defaultPostgresConnMaxIdle {
+		t.Fatalf("expected default conn max idle time, got %s", cfg.PostgresPool.ConnMaxIdleTime)
 	}
 	if cfg.AdminAPIKey != defaultAdminAPIKey {
 		t.Fatalf("expected default admin api key, got %q", cfg.AdminAPIKey)
@@ -159,6 +175,10 @@ func TestLoadWorkerDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("CACHE_PRUNE_INTERVAL", "20m")
 	t.Setenv("CACHE_PRUNE_BATCH", "250")
 	t.Setenv("SCHEDULE_POLL_INTERVAL", "45s")
+	t.Setenv("POSTGRES_MAX_OPEN_CONNS", "40")
+	t.Setenv("POSTGRES_MAX_IDLE_CONNS", "8")
+	t.Setenv("POSTGRES_CONN_MAX_LIFETIME", "7m")
+	t.Setenv("POSTGRES_CONN_MAX_IDLE_TIME", "3m")
 
 	cfg := LoadWorker()
 
@@ -170,6 +190,18 @@ func TestLoadWorkerDefaultsAndOverrides(t *testing.T) {
 	}
 	if cfg.JobStoreDSN != "postgres://worker:test@db:5432/iris?sslmode=disable" {
 		t.Fatalf("unexpected dsn: %q", cfg.JobStoreDSN)
+	}
+	if cfg.PostgresPool.MaxOpenConns != 40 {
+		t.Fatalf("unexpected max open conns: %d", cfg.PostgresPool.MaxOpenConns)
+	}
+	if cfg.PostgresPool.MaxIdleConns != 8 {
+		t.Fatalf("unexpected max idle conns: %d", cfg.PostgresPool.MaxIdleConns)
+	}
+	if cfg.PostgresPool.ConnMaxLifetime != 7*time.Minute {
+		t.Fatalf("unexpected conn max lifetime: %s", cfg.PostgresPool.ConnMaxLifetime)
+	}
+	if cfg.PostgresPool.ConnMaxIdleTime != 3*time.Minute {
+		t.Fatalf("unexpected conn max idle time: %s", cfg.PostgresPool.ConnMaxIdleTime)
 	}
 	if cfg.JobPollInterval != 2*time.Second {
 		t.Fatalf("unexpected poll interval: %s", cfg.JobPollInterval)

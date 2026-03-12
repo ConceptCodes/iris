@@ -39,6 +39,10 @@ const (
 	defaultOtelEnabled          = true
 	defaultOtelEndpoint         = "localhost:4317"
 	defaultSSRFAllowPrivateNets = false
+	defaultPostgresMaxOpenConns = 25
+	defaultPostgresMaxIdleConns = 5
+	defaultPostgresConnMaxLife  = 5 * time.Minute
+	defaultPostgresConnMaxIdle  = 2 * time.Minute
 )
 
 const (
@@ -68,6 +72,13 @@ type Shared struct {
 	SSRFAllowPrivateNetworks bool
 }
 
+type PostgresPool struct {
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+}
+
 func (s Shared) EncoderDims() map[models.Encoder]int {
 	dims := map[models.Encoder]int{
 		models.EncoderCLIP: s.ClipDim,
@@ -91,6 +102,7 @@ type Server struct {
 	HTTPAddr             string
 	JobBackend           string
 	JobStoreDSN          string
+	PostgresPool         PostgresPool
 	AdminAPIKey          string
 	AdminReadOnlyAPIKeys []string
 }
@@ -105,6 +117,7 @@ type Worker struct {
 	Mode                 string
 	JobBackend           string
 	JobStoreDSN          string
+	PostgresPool         PostgresPool
 	JobPollInterval      time.Duration
 	SchedulePollInterval time.Duration
 	LeaseDuration        time.Duration
@@ -137,6 +150,7 @@ func LoadServer() Server {
 			"JOB_STORE_DSN",
 			defaultJobStoreDSN,
 		),
+		PostgresPool: loadPostgresPool(),
 		AdminAPIKey: getEnv(
 			"ADMIN_API_KEY",
 			defaultAdminAPIKey,
@@ -164,6 +178,7 @@ func LoadWorker() Worker {
 			"JOB_STORE_DSN",
 			defaultJobStoreDSN,
 		),
+		PostgresPool: loadPostgresPool(),
 		JobPollInterval: getEnvDuration(
 			"JOB_POLL_INTERVAL",
 			time.Second,
@@ -223,6 +238,27 @@ func LoadWorker() Worker {
 		CrawlRPS: getEnvInt(
 			"CRAWL_RPS",
 			defaultCrawlRPS,
+		),
+	}
+}
+
+func loadPostgresPool() PostgresPool {
+	return PostgresPool{
+		MaxOpenConns: getEnvInt(
+			"POSTGRES_MAX_OPEN_CONNS",
+			defaultPostgresMaxOpenConns,
+		),
+		MaxIdleConns: getEnvInt(
+			"POSTGRES_MAX_IDLE_CONNS",
+			defaultPostgresMaxIdleConns,
+		),
+		ConnMaxLifetime: getEnvDuration(
+			"POSTGRES_CONN_MAX_LIFETIME",
+			defaultPostgresConnMaxLife,
+		),
+		ConnMaxIdleTime: getEnvDuration(
+			"POSTGRES_CONN_MAX_IDLE_TIME",
+			defaultPostgresConnMaxIdle,
 		),
 	}
 }
