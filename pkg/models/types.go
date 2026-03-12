@@ -16,11 +16,12 @@ func NormalizeEncoder(value Encoder) Encoder {
 }
 
 type ImageRecord struct {
-	ID       string            `json:"id"`
-	URL      string            `json:"url"`
-	Filename string            `json:"filename,omitempty"`
-	Tags     []string          `json:"tags,omitempty"`
-	Meta     map[string]string `json:"meta,omitempty"`
+	ID           string            `json:"id"`
+	URL          string            `json:"url"`
+	ThumbnailURL string            `json:"thumbnail_url,omitempty"`
+	Filename     string            `json:"filename,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	Meta         map[string]string `json:"meta,omitempty"`
 }
 
 type SearchResult struct {

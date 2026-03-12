@@ -1,10 +1,12 @@
 package indexing
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"image"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,6 +20,7 @@ import (
 	"iris/internal/ssrf"
 	"iris/pkg/models"
 
+	"github.com/disintegration/imaging"
 	"github.com/google/uuid"
 )
 
@@ -42,31 +45,36 @@ type Result struct {
 }
 
 type Pipeline struct {
-	engine     Engine
-	assetStore assets.Store
-	options    PipelineOptions
+	engine  Engine
+	options PipelineOptions
 }
 
 type PipelineOptions struct {
+	AssetStore               assets.Store
 	MaxFetchBytes            int
 	FetchClient              *http.Client
 	UserAgent                string
 	SSRFAllowPrivateNetworks bool
+	ThumbnailWidth           int
+	ThumbnailHeight          int
+	ThumbnailQuality         int
 }
 
-func NewPipeline(engine Engine, assetStore assets.Store) *Pipeline {
+func NewPipeline(engine Engine) *Pipeline {
 	return &Pipeline{
-		engine:     engine,
-		assetStore: assetStore,
+		engine: engine,
 		options: PipelineOptions{
-			MaxFetchBytes: constants.MaxImageSize,
-			FetchClient:   &http.Client{Timeout: constants.HTTPTimeout30s},
-			UserAgent:     constants.DefaultCrawlerUserAgent,
+			MaxFetchBytes:    constants.MaxImageSize,
+			FetchClient:      &http.Client{Timeout: constants.HTTPTimeout30s},
+			UserAgent:        constants.DefaultCrawlerUserAgent,
+			ThumbnailWidth:   250,
+			ThumbnailHeight:  0, // Preserve aspect ratio
+			ThumbnailQuality: 80,
 		},
 	}
 }
 
-func NewPipelineWithOptions(engine Engine, assetStore assets.Store, options PipelineOptions) *Pipeline {
+func NewPipelineWithOptions(engine Engine, options PipelineOptions) *Pipeline {
 	if options.MaxFetchBytes <= 0 {
 		options.MaxFetchBytes = constants.MaxImageSize
 	}
@@ -76,10 +84,15 @@ func NewPipelineWithOptions(engine Engine, assetStore assets.Store, options Pipe
 	if strings.TrimSpace(options.UserAgent) == "" {
 		options.UserAgent = constants.DefaultCrawlerUserAgent
 	}
+	if options.ThumbnailWidth <= 0 {
+		options.ThumbnailWidth = 250
+	}
+	if options.ThumbnailQuality <= 0 {
+		options.ThumbnailQuality = 80
+	}
 	return &Pipeline{
-		engine:     engine,
-		assetStore: assetStore,
-		options:    options,
+		engine:  engine,
+		options: options,
 	}
 }
 
@@ -101,6 +114,7 @@ func (p *Pipeline) IndexFromURLResult(ctx context.Context, req models.IndexReque
 	}
 	record := models.ImageRecord{
 		ID:       uuid.New().String(),
+		URL:      req.URL,
 		Filename: req.Filename,
 		Tags:     req.Tags,
 		Meta:     cloneMeta(req.Meta),
@@ -214,14 +228,18 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 			return Result{ID: existing, Status: ResultStatusDuplicate}, nil
 		}
 	}
-	if p.assetStore != nil {
-		assetURL, err := p.assetStore.Save(record.ID, record.Filename, imageBytes)
+	if p.options.AssetStore != nil && p.options.ThumbnailWidth > 0 {
+		thumbBytes, err := p.generateThumbnail(imageBytes)
 		if err != nil {
-			return Result{}, fmt.Errorf("store image asset: %w", err)
-		}
-		record.URL = assetURL
-		if record.Meta[constants.MetaKeySourceURL] == "" {
-			record.Meta[constants.MetaKeySourceURL] = assetURL
+			// Non-fatal: log and continue without a thumbnail
+			fmt.Fprintf(os.Stderr, "failed to generate thumbnail for %s: %v\n", record.ID, err)
+		} else {
+			thumbURL, err := p.options.AssetStore.Save(record.ID+"_thumb", record.Filename, thumbBytes)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to save thumbnail for %s: %v\n", record.ID, err)
+			} else {
+				record.ThumbnailURL = thumbURL
+			}
 		}
 	}
 	var id string
@@ -241,6 +259,24 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 		return Result{ID: id, Status: ResultStatusReindexed}, nil
 	}
 	return Result{ID: id, Status: ResultStatusIndexed}, nil
+}
+
+func (p *Pipeline) generateThumbnail(data []byte) ([]byte, error) {
+	img, err := imaging.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode image: %w", err)
+	}
+
+	thumb := imaging.Resize(img, p.options.ThumbnailWidth, p.options.ThumbnailHeight, imaging.Lanczos)
+	return p.encodeThumbnail(thumb)
+}
+
+func (p *Pipeline) encodeThumbnail(img image.Image) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := imaging.Encode(&buf, img, imaging.JPEG, imaging.JPEGQuality(p.options.ThumbnailQuality)); err != nil {
+		return nil, fmt.Errorf("encode thumbnail: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 func dedupeReason(meta map[string]string) string {
