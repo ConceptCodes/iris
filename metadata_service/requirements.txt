@@ -1,0 +1,6 @@
+grpcio>=1.78.0
+grpcio-health-checking>=1.78.0
+protobuf>=6.31.1
+easyocr>=1.7.1
+Pillow>=10.2.0
+transformers>=4.49.0
