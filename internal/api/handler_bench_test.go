@@ -104,7 +104,7 @@ func benchmarkAPISearchResults(n int) []models.SearchResult {
 func benchmarkAPIHandler() *Handler {
 	return NewHandler(
 		&benchmarkEngine{searchResults: benchmarkAPISearchResults(40)},
-		indexing.NewPipeline(&benchmarkIndexEngine{}, nil),
+		indexing.NewPipeline(&benchmarkIndexEngine{}),
 		nil,
 		nil,
 		metrics.NewCounters(),
@@ -178,7 +178,7 @@ func BenchmarkHandlerIndexFromURL(b *testing.B) {
 
 	h := NewHandler(
 		&benchmarkEngine{searchResults: benchmarkAPISearchResults(40)},
-		indexing.NewPipelineWithOptions(&benchmarkIndexEngine{}, nil, indexing.PipelineOptions{
+		indexing.NewPipelineWithOptions(&benchmarkIndexEngine{}, indexing.PipelineOptions{
 			SSRFAllowPrivateNetworks: true,
 		}),
 		nil,

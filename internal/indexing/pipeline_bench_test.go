@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-
-	"iris/internal/assets"
 )
 
 func benchmarkImageBytes(size int) []byte {
@@ -23,7 +21,7 @@ func BenchmarkPipelineIndexUploadedBytes(b *testing.B) {
 
 	b.Run("unique_no_asset_store", func(b *testing.B) {
 		engine := &mockEngine{id: "indexed-id"}
-		pipeline := NewPipeline(engine, nil)
+		pipeline := NewPipeline(engine)
 
 		b.SetBytes(int64(len(imageBytes)))
 		b.ReportAllocs()
@@ -40,7 +38,7 @@ func BenchmarkPipelineIndexUploadedBytes(b *testing.B) {
 
 	b.Run("duplicate_no_asset_store", func(b *testing.B) {
 		engine := &mockEngine{id: "indexed-id", findID: "existing-id", findOK: true}
-		pipeline := NewPipeline(engine, nil)
+		pipeline := NewPipeline(engine)
 
 		b.SetBytes(int64(len(imageBytes)))
 		b.ReportAllocs()
@@ -55,9 +53,9 @@ func BenchmarkPipelineIndexUploadedBytes(b *testing.B) {
 		}
 	})
 
-	b.Run("unique_with_local_asset_store", func(b *testing.B) {
+	b.Run("unique_with_nil_asset_store", func(b *testing.B) {
 		engine := &mockEngine{id: "indexed-id"}
-		pipeline := NewPipeline(engine, assets.NewStore(b.TempDir()))
+		pipeline := NewPipeline(engine)
 
 		b.SetBytes(int64(len(imageBytes)))
 		b.ReportAllocs()
@@ -83,7 +81,7 @@ func BenchmarkPipelineIndexLocalFile(b *testing.B) {
 	}
 
 	engine := &mockEngine{id: "local-id"}
-	pipeline := NewPipeline(engine, nil)
+	pipeline := NewPipeline(engine)
 
 	b.SetBytes(int64(len(imageBytes)))
 	b.ReportAllocs()

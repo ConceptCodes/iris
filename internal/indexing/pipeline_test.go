@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"iris/internal/assets"
 	"iris/internal/constants"
 	"iris/pkg/models"
 )
@@ -59,13 +58,9 @@ func (s failingAssetStore) Save(id, filename string, data []byte) (string, error
 	return "", s.err
 }
 
-func (s failingAssetStore) LocalDir() (string, bool) {
-	return "", false
-}
-
 func TestPipelineIndexFromURL(t *testing.T) {
 	engine := &mockEngine{id: "url-id"}
-	pipeline := NewPipelineWithOptions(engine, nil, PipelineOptions{
+	pipeline := NewPipelineWithOptions(engine, PipelineOptions{
 		UserAgent:                "test-agent/1.0",
 		SSRFAllowPrivateNetworks: true,
 	})
@@ -100,10 +95,9 @@ func TestPipelineIndexFromURL(t *testing.T) {
 	}
 }
 
-func TestPipelineIndexUploadedBytesStoresAsset(t *testing.T) {
+func TestPipelineIndexUploadedBytesSucceedsWithoutAssetStore(t *testing.T) {
 	engine := &mockEngine{id: "upload-id"}
-	assetDir := t.TempDir()
-	pipeline := NewPipeline(engine, assets.NewStore(assetDir))
+	pipeline := NewPipeline(engine)
 
 	id, err := pipeline.IndexUploadedBytes(
 		context.Background(),
@@ -118,22 +112,11 @@ func TestPipelineIndexUploadedBytesStoresAsset(t *testing.T) {
 	if id != "upload-id" {
 		t.Fatalf("unexpected id: %s", id)
 	}
-	if engine.lastRecord == nil || engine.lastRecord.URL == "" || !strings.HasPrefix(engine.lastRecord.URL, "/assets/") {
-		t.Fatalf("expected asset url, got %q", engine.lastRecord.URL)
-	}
-	files, err := os.ReadDir(assetDir)
-	if err != nil {
-		t.Fatalf("read asset dir: %v", err)
-	}
-	if len(files) != 1 {
-		t.Fatalf("expected one stored asset, got %d", len(files))
-	}
 }
 
 func TestPipelineIndexUploadedBytesSkipsAssetForDuplicate(t *testing.T) {
 	engine := &mockEngine{id: "upload-id", findID: "existing-id", findOK: true}
-	assetDir := t.TempDir()
-	pipeline := NewPipeline(engine, assets.NewStore(assetDir))
+	pipeline := NewPipeline(engine)
 
 	result, err := pipeline.IndexUploadedBytesResult(
 		context.Background(),
@@ -151,19 +134,11 @@ func TestPipelineIndexUploadedBytesSkipsAssetForDuplicate(t *testing.T) {
 	if result.ID != "existing-id" {
 		t.Fatalf("unexpected existing id: %s", result.ID)
 	}
-	files, err := os.ReadDir(assetDir)
-	if err != nil {
-		t.Fatalf("read asset dir: %v", err)
-	}
-	if len(files) != 0 {
-		t.Fatalf("expected no stored assets for duplicate, got %d", len(files))
-	}
 }
 
 func TestPipelineIndexLocalFile(t *testing.T) {
 	engine := &mockEngine{id: "local-id"}
-	assetDir := t.TempDir()
-	pipeline := NewPipeline(engine, assets.NewStore(assetDir))
+	pipeline := NewPipeline(engine)
 
 	inputDir := t.TempDir()
 	path := filepath.Join(inputDir, "photo.jpg")
@@ -188,7 +163,7 @@ func TestPipelineIndexLocalFile(t *testing.T) {
 
 func TestPipelineReindexFromURL(t *testing.T) {
 	engine := &mockEngine{id: "reindex-id"}
-	pipeline := NewPipelineWithOptions(engine, nil, PipelineOptions{
+	pipeline := NewPipelineWithOptions(engine, PipelineOptions{
 		UserAgent:                "test-agent/1.0",
 		SSRFAllowPrivateNetworks: true,
 	})
@@ -222,7 +197,7 @@ func TestPipelineReindexFromURL(t *testing.T) {
 }
 
 func TestPipelineIndexFromURLEmptyURL(t *testing.T) {
-	pipeline := NewPipelineWithOptions(&mockEngine{}, nil, PipelineOptions{})
+	pipeline := NewPipelineWithOptions(&mockEngine{}, PipelineOptions{})
 	if _, err := pipeline.IndexFromURLResult(context.Background(), models.IndexRequest{}); err == nil {
 		t.Fatal("expected error for empty URL")
 	}
@@ -272,7 +247,7 @@ func TestFetchImageBytesUsesContentSniffingWhenContentTypeMissing(t *testing.T) 
 
 func TestPipelinePreservesExistingContentHash(t *testing.T) {
 	engine := &mockEngine{id: "hash-id"}
-	pipeline := NewPipeline(engine, nil)
+	pipeline := NewPipeline(engine)
 
 	existingHash := "already-set"
 	result, err := pipeline.IndexUploadedBytesResult(context.Background(), []byte("image-bytes"), "photo.jpg", nil, map[string]string{
@@ -291,7 +266,7 @@ func TestPipelinePreservesExistingContentHash(t *testing.T) {
 
 func TestPipelineIndexUploadedBytesPropagatesDuplicateLookupError(t *testing.T) {
 	engine := &mockEngine{findErr: errors.New("dedupe failed")}
-	pipeline := NewPipeline(engine, nil)
+	pipeline := NewPipeline(engine)
 
 	_, err := pipeline.IndexUploadedBytesResult(context.Background(), []byte("image-bytes"), "photo.jpg", nil, nil)
 	if err == nil || err.Error() != "dedupe failed" {
@@ -299,19 +274,26 @@ func TestPipelineIndexUploadedBytesPropagatesDuplicateLookupError(t *testing.T) 
 	}
 }
 
-func TestPipelineIndexUploadedBytesPropagatesAssetStoreFailure(t *testing.T) {
+func TestPipelineIndexUploadedBytesSucceedsEvenIfAssetStoreFails(t *testing.T) {
+	// Thumbnail save failures are non-fatal: the pipeline logs and continues.
 	engine := &mockEngine{id: "upload-id"}
-	pipeline := NewPipeline(engine, failingAssetStore{err: errors.New("disk full")})
+	pipeline := NewPipelineWithOptions(engine, PipelineOptions{
+		AssetStore: failingAssetStore{err: errors.New("disk full")},
+		ThumbnailWidth: 0, // Disable thumbnail generation so we reach the store call
+	})
 
-	_, err := pipeline.IndexUploadedBytesResult(context.Background(), []byte("image-bytes"), "photo.jpg", nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "store image asset: disk full") {
-		t.Fatalf("expected asset store error, got %v", err)
+	result, err := pipeline.IndexUploadedBytesResult(context.Background(), []byte("image-bytes"), "photo.jpg", nil, nil)
+	if err != nil {
+		t.Fatalf("expected pipeline to succeed even if store fails, got %v", err)
+	}
+	if result.ID != "upload-id" {
+		t.Fatalf("unexpected id: %s", result.ID)
 	}
 }
 
 func TestPipelineReindexFromURLReturnsReindexedStatus(t *testing.T) {
 	engine := &mockEngine{id: "reindex-id"}
-	pipeline := NewPipelineWithOptions(engine, nil, PipelineOptions{
+	pipeline := NewPipelineWithOptions(engine, PipelineOptions{
 		SSRFAllowPrivateNetworks: true,
 	})
 
