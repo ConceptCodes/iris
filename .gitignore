@@ -1,6 +1,7 @@
 .agents/
 .sisyphus/
 __pycache__/
+.tmp-grpc-tools/
 
 # Binaries
 bin/
@@ -9,3 +10,5 @@ bin/
 .env.*
 
 data/
+examples/
+.DS_Store
