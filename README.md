@@ -1,4 +1,4 @@
-# iris
+![preview](assets/preview.png)
 
 `iris` is a Go image search engine with a Google Images-style UI.
 
@@ -61,6 +61,10 @@ Visit [http://localhost:8080](http://localhost:8080) to use the UI.
 | `siglip2` | 8002 | SigLIP2 Embedding gRPC Service |
 | `postgres` | 5432 | Worker Job Store |
 | `grafana` | 3000 | Observability Dashboard |
+| `minio` | 9000 / 9001 | S3-Compatible Object Store |
+
+Grafana defaults to `admin` / `admin` in local Docker unless you override
+`GRAFANA_ADMIN_USER` or `GRAFANA_ADMIN_PASSWORD`.
 
 ## Encoder Transport
 
@@ -75,6 +79,18 @@ Current encoder names:
 
 - `clip`
 - `siglip2`
+
+## Metadata Enrichment
+
+Ingestion can optionally enrich image records with:
+
+- EXIF metadata extracted in Go
+- OCR text from the metadata gRPC sidecar
+- caption-derived tags from the metadata gRPC sidecar
+
+Set `METADATA_ADDR` to enable the sidecar-backed enrichment path. The Docker
+stack wires this to `http://metadata:8003` by default, which is normalized to a
+gRPC target internally.
 
 The encoder protobuf contract currently lives at `proto/clip/v1/clip.proto` and is shared by both sidecars.
 
@@ -104,4 +120,6 @@ This updates:
 - `web/`: Frontend templates and assets.
 - `proto/`: Shared protobuf contracts.
 - `clip_service/`: Python CLIP gRPC service.
+- `siglip_service/`: Python SigLIP2 gRPC service.
+- `metadata_service/`: Python Metadata gRPC service.
 - `infra/`: Docker and environment configuration.
