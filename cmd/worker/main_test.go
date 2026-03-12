@@ -250,7 +250,7 @@ func TestNewCrawlStoreErrorsForUnsupportedBackend(t *testing.T) {
 
 func TestHandleIndexerJobFetchImageMapsMetadata(t *testing.T) {
 	engine := &mockEngine{id: "test-id"}
-	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{
+	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
 		UserAgent:                "test-agent/1.0",
 		SSRFAllowPrivateNetworks: true,
 	})
@@ -316,7 +316,7 @@ func TestHandleIndexerJobFetchImageMapsMetadata(t *testing.T) {
 
 func TestHandleIndexerJobIndexLocalFile(t *testing.T) {
 	engine := &mockEngine{id: "local-id"}
-	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{})
+	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{})
 
 	path := filepath.Join(t.TempDir(), "image.jpg")
 	if err := os.WriteFile(path, []byte("local-bytes"), 0o644); err != nil {
@@ -347,7 +347,7 @@ func TestHandleIndexerJobIndexLocalFile(t *testing.T) {
 
 func TestHandleIndexerJobReindexImage(t *testing.T) {
 	engine := &mockEngine{id: "reindex-id"}
-	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{
+	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
 		UserAgent:                "test-agent/1.0",
 		SSRFAllowPrivateNetworks: true,
 	})
@@ -386,7 +386,7 @@ func TestHandleIndexerJobReindexImage(t *testing.T) {
 
 func TestHandleIndexerJobMalformedJSON(t *testing.T) {
 	engine := &mockEngine{}
-	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{})
+	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{})
 	job := jobs.Job{
 		Type:        jobs.TypeFetchImage,
 		PayloadJSON: []byte("not valid json"),
@@ -399,7 +399,7 @@ func TestHandleIndexerJobMalformedJSON(t *testing.T) {
 
 func TestHandleIndexerJobUnknownType(t *testing.T) {
 	engine := &mockEngine{}
-	pipeline := indexing.NewPipelineWithOptions(engine, nil, indexing.PipelineOptions{})
+	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{})
 	job := jobs.Job{
 		Type:        "unknown_type",
 		PayloadJSON: []byte("{}"),

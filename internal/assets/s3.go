@@ -35,19 +35,19 @@ type S3Store struct {
 }
 
 type Settings struct {
-	Backend  string
-	LocalDir string
-	S3       S3Config
+	Backend string
+	S3      S3Config
 }
 
+// NewStoreFromSettings creates an S3Store from the provided settings.
+// The only supported backend is "s3". An empty backend will return an error,
+// enforcing that thumbnails are always stored remotely.
 func NewStoreFromSettings(ctx context.Context, settings Settings) (Store, error) {
 	switch strings.ToLower(strings.TrimSpace(settings.Backend)) {
-	case "", "local":
-		return NewStore(settings.LocalDir), nil
 	case "s3":
 		return NewS3Store(ctx, settings.S3)
 	default:
-		return nil, fmt.Errorf("unknown asset backend: %s", settings.Backend)
+		return nil, fmt.Errorf("unknown asset backend %q: only \"s3\" is supported", settings.Backend)
 	}
 }
 
@@ -89,10 +89,6 @@ func loadAWSConfig(ctx context.Context, cfg S3Config) (aws.Config, error) {
 		))
 	}
 	return config.LoadDefaultConfig(ctx, options...)
-}
-
-func (s *S3Store) LocalDir() (string, bool) {
-	return "", false
 }
 
 func (s *S3Store) Save(id, filename string, data []byte) (string, error) {

@@ -18,7 +18,6 @@ const (
 	defaultSearchEncoder        = "clip"
 	defaultHTTPAddr             = ":8080"
 	defaultConcurrency          = 4
-	defaultAssetDir             = "./data/assets"
 	defaultAssetBackend         = "local"
 	defaultAssetBucket          = ""
 	defaultAssetRegion          = ""
@@ -54,7 +53,6 @@ type Shared struct {
 	SigLIP2Addr              string
 	SigLIP2Dim               int
 	DefaultSearchEncoder     models.Encoder
-	AssetDir                 string
 	AssetBackend             string
 	AssetBucket              string
 	AssetRegion              string
@@ -255,10 +253,6 @@ func loadShared() Shared {
 			"DEFAULT_SEARCH_ENCODER",
 			defaultSearchEncoder,
 		))),
-		AssetDir: getEnv(
-			"ASSET_DIR",
-			defaultAssetDir,
-		),
 		AssetBackend: getEnv(
 			"ASSET_BACKEND",
 			defaultAssetBackend,

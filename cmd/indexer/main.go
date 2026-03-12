@@ -47,7 +47,7 @@ func main() {
 
 	cfg := config.LoadIndexer()
 
-	slog.Info("starting indexer", "mode", *mode, "input", *input, "concurrency", cfg.Concurrency, "asset_dir", cfg.AssetDir)
+	slog.Info("starting indexer", "mode", *mode, "input", *input, "concurrency", cfg.Concurrency)
 
 	encoderRegistry, cleanupEncoders, err := encoder.NewRegistryFromConfig(cfg.Shared)
 	if err != nil {
@@ -64,8 +64,7 @@ func main() {
 
 	engine := search.NewEngine(encoderRegistry, qdrantStore)
 	assetStore, err := assets.NewStoreFromSettings(context.Background(), assets.Settings{
-		Backend:  cfg.AssetBackend,
-		LocalDir: cfg.AssetDir,
+		Backend: cfg.AssetBackend,
 		S3: assets.S3Config{
 			Bucket:       cfg.AssetBucket,
 			Region:       cfg.AssetRegion,
@@ -82,7 +81,8 @@ func main() {
 		slog.Error("failed to initialize asset store", "error", err)
 		os.Exit(1)
 	}
-	pipeline := indexing.NewPipeline(engine, assetStore)
+	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
+		AssetStore: assetStore,})
 
 	var jobs []string
 	switch *mode {

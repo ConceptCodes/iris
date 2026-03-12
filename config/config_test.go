@@ -10,7 +10,6 @@ func TestLoadServerDefaults(t *testing.T) {
 	t.Setenv("QDRANT_ADDR", "")
 	t.Setenv("CLIP_DIM", "")
 	t.Setenv("HTTP_ADDR", "")
-	t.Setenv("ASSET_DIR", "")
 	t.Setenv("ASSET_BACKEND", "")
 	t.Setenv("ASSET_S3_BUCKET", "")
 	t.Setenv("ASSET_S3_REGION", "")
@@ -36,9 +35,6 @@ func TestLoadServerDefaults(t *testing.T) {
 	}
 	if cfg.HTTPAddr != defaultHTTPAddr {
 		t.Fatalf("expected default http addr, got %q", cfg.HTTPAddr)
-	}
-	if cfg.AssetDir != defaultAssetDir {
-		t.Fatalf("expected default asset dir, got %q", cfg.AssetDir)
 	}
 	if cfg.AssetBackend != defaultAssetBackend {
 		t.Fatalf("expected default asset backend, got %q", cfg.AssetBackend)
@@ -90,7 +86,6 @@ func TestLoadIndexerOverrides(t *testing.T) {
 	t.Setenv("QDRANT_ADDR", "qdrant:7334")
 	t.Setenv("CLIP_DIM", "768")
 	t.Setenv("CONCURRENCY", "12")
-	t.Setenv("ASSET_DIR", "/tmp/assets")
 	t.Setenv("ASSET_BACKEND", "s3")
 	t.Setenv("ASSET_S3_BUCKET", "bucket")
 	t.Setenv("ASSET_S3_REGION", "us-east-1")
@@ -112,9 +107,6 @@ func TestLoadIndexerOverrides(t *testing.T) {
 	}
 	if cfg.Concurrency != 12 {
 		t.Fatalf("unexpected concurrency: %d", cfg.Concurrency)
-	}
-	if cfg.AssetDir != "/tmp/assets" {
-		t.Fatalf("unexpected asset dir: %q", cfg.AssetDir)
 	}
 	if cfg.AssetBackend != "s3" {
 		t.Fatalf("unexpected asset backend: %q", cfg.AssetBackend)

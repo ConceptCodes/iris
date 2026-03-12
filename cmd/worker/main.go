@@ -212,8 +212,7 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 
 	engine := search.NewEngine(encoderRegistry, qdrantStore)
 	assetStore, err := assets.NewStoreFromSettings(ctx, assets.Settings{
-		Backend:  cfg.AssetBackend,
-		LocalDir: cfg.AssetDir,
+		Backend: cfg.AssetBackend,
 		S3: assets.S3Config{
 			Bucket:       cfg.AssetBucket,
 			Region:       cfg.AssetRegion,
@@ -229,7 +228,8 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	if err != nil {
 		return err
 	}
-	pipeline := indexing.NewPipelineWithOptions(engine, assetStore, indexing.PipelineOptions{
+	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
+		AssetStore: assetStore,
 		MaxFetchBytes:            cfg.MaxImageBytes,
 		FetchClient:              &http.Client{Timeout: cfg.FetchTimeout},
 		UserAgent:                cfg.UserAgent,

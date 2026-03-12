@@ -11,18 +11,15 @@ func TestNewS3StoreRequiresBucket(t *testing.T) {
 	}
 }
 
-func TestNewStoreFromSettingsDefaultsToLocal(t *testing.T) {
-	store, err := NewStoreFromSettings(context.Background(), Settings{LocalDir: ""})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestNewStoreFromSettingsRequiresS3Backend(t *testing.T) {
+	// Empty backend should be rejected
+	_, err := NewStoreFromSettings(context.Background(), Settings{})
+	if err == nil {
+		t.Fatal("expected error for empty backend")
 	}
-	if _, ok := store.LocalDir(); !ok {
-		t.Fatal("expected local store when backend is empty")
-	}
-}
 
-func TestNewStoreFromSettingsRejectsUnknownBackend(t *testing.T) {
-	_, err := NewStoreFromSettings(context.Background(), Settings{Backend: "unknown"})
+	// Unknown backend should be rejected
+	_, err = NewStoreFromSettings(context.Background(), Settings{Backend: "unknown"})
 	if err == nil {
 		t.Fatal("expected error for unknown backend")
 	}

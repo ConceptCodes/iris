@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -55,7 +54,7 @@ func (m *mockSearchEngine) ListImages(ctx context.Context, filters map[string]st
 var _ search.Engine = (*mockSearchEngine)(nil)
 
 func TestRouterHealth(t *testing.T) {
-	router := NewRouterWithAssets(nil, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
+	router := NewRouterWithAssets(nil, AssetsSettings{}, nil, "", nil)
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -69,7 +68,7 @@ func TestRouterHealth(t *testing.T) {
 }
 
 func TestRouterLanding(t *testing.T) {
-	router := NewRouterWithAssets(nil, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
+	router := NewRouterWithAssets(nil, AssetsSettings{}, nil, "", nil)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -83,7 +82,7 @@ func TestRouterLanding(t *testing.T) {
 }
 
 func TestRouterEndpoints(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{}, nil, "", nil)
 
 	tests := []struct {
 		method string
@@ -106,7 +105,7 @@ func TestRouterEndpoints(t *testing.T) {
 }
 
 func TestRouterMethodEnforcement(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{}, nil, "", nil)
 	req := httptest.NewRequest("POST", "/health", nil) // health is GET
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -116,7 +115,7 @@ func TestRouterMethodEnforcement(t *testing.T) {
 }
 
 func TestRouterMiddleware(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{}, nil, "", nil)
 
 	// CORS preflight
 	req := httptest.NewRequest("OPTIONS", "/search/text", nil)
@@ -145,7 +144,7 @@ func TestRouterMiddleware(t *testing.T) {
 func TestRouterAdminEndpoints(t *testing.T) {
 	jobStore := jobs.NewMemoryStore()
 	crawlService := crawl.NewService(crawl.NewMemoryStore(), jobStore)
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, crawlService, "secret", jobStore)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{}, crawlService, "secret", jobStore)
 
 	req := httptest.NewRequest("POST", "/admin/sources", strings.NewReader(`{"kind":"local_dir","local_path":"./images"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -161,7 +160,7 @@ func TestRouterAdminEndpoints(t *testing.T) {
 func TestRouterAdminLocalIndexEndpoint(t *testing.T) {
 	jobStore := jobs.NewMemoryStore()
 	crawlService := crawl.NewService(crawl.NewMemoryStore(), jobStore)
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, crawlService, "secret", jobStore)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{}, crawlService, "secret", jobStore)
 
 	req := httptest.NewRequest("POST", "/admin/index/local", strings.NewReader(`{"path":"./images"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -175,7 +174,7 @@ func TestRouterAdminLocalIndexEndpoint(t *testing.T) {
 }
 
 func TestRouterAdminMetrics(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "secret", nil)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{}, nil, "secret", nil)
 	req := httptest.NewRequest("GET", "/admin/metrics", nil)
 	req.Header.Set("X-Admin-Key", "secret")
 	w := httptest.NewRecorder()
@@ -186,7 +185,7 @@ func TestRouterAdminMetrics(t *testing.T) {
 }
 
 func TestRouterAdminReadOnlyRole(t *testing.T) {
-	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, AdminAuthSettings{
+	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{}, nil, AdminAuthSettings{
 		AdminAPIKey:     "secret",
 		ReadOnlyAPIKeys: []string{"viewer"},
 	}, nil)
@@ -210,7 +209,7 @@ func TestRouterAdminReadOnlyRole(t *testing.T) {
 }
 
 func TestRouterAdminSupportsBearerToken(t *testing.T) {
-	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, AdminAuthSettings{
+	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{}, nil, AdminAuthSettings{
 		AdminAPIKey: "secret",
 	}, nil)
 
@@ -224,7 +223,7 @@ func TestRouterAdminSupportsBearerToken(t *testing.T) {
 }
 
 func TestRouterAdminRejectsReadOnlyBearerOnWriteRoute(t *testing.T) {
-	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, AdminAuthSettings{
+	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{}, nil, AdminAuthSettings{
 		AdminAPIKey:     "secret",
 		ReadOnlyAPIKeys: []string{"viewer"},
 	}, nil)
@@ -240,7 +239,7 @@ func TestRouterAdminRejectsReadOnlyBearerOnWriteRoute(t *testing.T) {
 }
 
 func TestRouterAdminDisabledWithoutKey(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{}, nil, "", nil)
 	req := httptest.NewRequest("GET", "/admin/runs", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -250,7 +249,7 @@ func TestRouterAdminDisabledWithoutKey(t *testing.T) {
 }
 
 func TestRouterAdminMetricsDisabled(t *testing.T) {
-	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, "", nil)
+	router := NewRouterWithAssets(&mockSearchEngine{}, AssetsSettings{}, nil, "", nil)
 	req := httptest.NewRequest("GET", "/admin/metrics", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -260,7 +259,7 @@ func TestRouterAdminMetricsDisabled(t *testing.T) {
 }
 
 func TestRouterPrometheusMetricsRouteIsAdminProtected(t *testing.T) {
-	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{LocalDir: t.TempDir()}, nil, AdminAuthSettings{
+	router := NewRouterWithAssetsAndAuth(&mockSearchEngine{}, AssetsSettings{}, nil, AdminAuthSettings{
 		AdminAPIKey: "secret",
 	}, nil)
 
@@ -279,17 +278,11 @@ func TestRouterPrometheusMetricsRouteIsAdminProtected(t *testing.T) {
 	}
 }
 
-func TestBuildAssetStoreFallsBackToLocalStoreOnInvalidSettings(t *testing.T) {
-	dir := t.TempDir()
-	store, assetDir := buildAssetStore(AssetsSettings{
-		Backend:  "s3",
-		LocalDir: dir,
-	})
-	if store == nil {
-		t.Fatal("expected fallback local store")
-	}
-	if assetDir != dir {
-		t.Fatalf("expected asset dir %q, got %q", dir, assetDir)
+func TestBuildAssetStoreReturnsNilForInvalidS3Settings(t *testing.T) {
+	// Missing bucket — NewS3Store will fail, buildAssetStore returns nil.
+	store := buildAssetStore(AssetsSettings{Backend: "s3"})
+	if store != nil {
+		t.Fatal("expected nil store when S3 settings are invalid")
 	}
 }
 
@@ -335,27 +328,5 @@ func TestNewCrawlServicePostgresFailureReturnsError(t *testing.T) {
 	}
 	if service != nil || jobStore != nil || cleanup != nil {
 		t.Fatalf("expected nil return values on postgres init failure")
-	}
-}
-
-func TestBuildAssetStoreReturnsUsableLocalStore(t *testing.T) {
-	dir := t.TempDir()
-	store, assetDir := buildAssetStore(AssetsSettings{LocalDir: dir})
-	if assetDir != dir {
-		t.Fatalf("expected local asset dir %q, got %q", dir, assetDir)
-	}
-	url, err := store.Save("asset-1", "photo.jpg", []byte("image-bytes"))
-	if err != nil {
-		t.Fatalf("save asset: %v", err)
-	}
-	if url == "" {
-		t.Fatal("expected non-empty asset URL")
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read dir: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 asset written, got %d", len(entries))
 	}
 }

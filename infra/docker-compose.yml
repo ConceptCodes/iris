@@ -158,8 +158,34 @@ services:
     depends_on:
       - prometheus
 
+  # ── MinIO (S3 Mock) ────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:RELEASE.2024-01-31T20-20-33Z
+    ports:
+      - "9000:9000"   # API
+      - "9001:9001"   # Console
+    environment:
+      - MINIO_ROOT_USER=iris
+      - MINIO_ROOT_PASSWORD=irispassword
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-01-26T16-52-32Z
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set local http://minio:9000 iris irispassword) do echo '...waiting for minio...' && sleep 1; done;
+      /usr/bin/mc mb local/iris-thumbnails;
+      /usr/bin/mc anonymous set public local/iris-thumbnails;
+      exit 0;
+      "
+
 volumes:
   qdrant_data:
   postgres_data:
   prometheus_data:
   grafana_data:
+  minio_data:

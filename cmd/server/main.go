@@ -24,7 +24,7 @@ func main() {
 
 	cfg := config.LoadServer()
 
-	slog.Info("starting server", "clip_addr", cfg.ClipAddr, "siglip2_addr", cfg.SigLIP2Addr, "qdrant_addr", cfg.QdrantAddr, "encoders", cfg.EnabledEncoders(), "asset_dir", cfg.AssetDir, "otel_enabled", cfg.OtelEnabled)
+	slog.Info("starting server", "clip_addr", cfg.ClipAddr, "siglip2_addr", cfg.SigLIP2Addr, "qdrant_addr", cfg.QdrantAddr, "encoders", cfg.EnabledEncoders(), "otel_enabled", cfg.OtelEnabled)
 
 	// Initialize OpenTelemetry tracer if enabled
 	var otelShutdown func()
@@ -62,7 +62,6 @@ func main() {
 	}
 	router := api.NewRouterWithAssetsAndAuth(engine, api.AssetsSettings{
 		Backend:    cfg.AssetBackend,
-		LocalDir:   cfg.AssetDir,
 		Bucket:     cfg.AssetBucket,
 		Region:     cfg.AssetRegion,
 		Endpoint:   cfg.AssetEndpoint,

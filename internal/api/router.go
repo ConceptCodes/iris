@@ -21,9 +21,8 @@ import (
 )
 
 type AssetsSettings struct {
-	Backend    string
-	LocalDir   string
-	Bucket     string
+	Backend string
+	Bucket  string
 	Region     string
 	Endpoint   string
 	AccessKey  string
@@ -70,8 +69,8 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func NewRouter(engine search.Engine, assetDir string, crawlService *crawl.Service, adminAPIKey string) http.Handler {
-	return NewRouterWithAssets(engine, AssetsSettings{LocalDir: assetDir}, crawlService, adminAPIKey, nil)
+func NewRouter(engine search.Engine, crawlService *crawl.Service, adminAPIKey string) http.Handler {
+	return NewRouterWithAssets(engine, AssetsSettings{}, crawlService, adminAPIKey, nil)
 }
 
 func NewRouterWithAssets(engine search.Engine, assetsCfg AssetsSettings, crawlService *crawl.Service, adminAPIKey string, jobStore jobs.Store) http.Handler {
@@ -97,8 +96,10 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 	// Add OpenTelemetry instrumentation
 	r.Use(otelchi.Middleware("iris-server", otelchi.WithChiRoutes(r)))
 
-	assetStore, assetDir := buildAssetStore(assetsCfg)
-	indexer := indexing.NewPipeline(engine, assetStore)
+	assetStore := buildAssetStore(assetsCfg)
+	indexer := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
+		AssetStore: assetStore,
+	})
 	if jobStore == nil {
 		jobStore = jobs.NewMemoryStore()
 	}
@@ -160,20 +161,15 @@ func NewRouterWithAssetsAndAuth(engine search.Engine, assetsCfg AssetsSettings, 
 		r.Post(constants.PathIndexUpload, adminDisabled)
 	}
 
-	if assetDir != "" {
-		r.Handle(constants.PathAssets+"/*", http.StripPrefix(constants.PathAssets+"/", http.FileServer(http.Dir(assetDir))))
-	}
-
 	// Serve static UI assets (CSS, JS)
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
 
 	return r
 }
 
-func buildAssetStore(cfg AssetsSettings) (assets.Store, string) {
+func buildAssetStore(cfg AssetsSettings) assets.Store {
 	store, err := assets.NewStoreFromSettings(context.Background(), assets.Settings{
-		Backend:  cfg.Backend,
-		LocalDir: cfg.LocalDir,
+		Backend: cfg.Backend,
 		S3: assets.S3Config{
 			Bucket:       cfg.Bucket,
 			Region:       cfg.Region,
@@ -187,12 +183,11 @@ func buildAssetStore(cfg AssetsSettings) (assets.Store, string) {
 		},
 	})
 	if err != nil {
-		store = assets.NewStore(cfg.LocalDir)
+		// Log the misconfiguration and continue without thumbnail storage.
+		// The pipeline handles a nil store gracefully.
+		return nil
 	}
-	if dir, ok := store.LocalDir(); ok {
-		return store, dir
-	}
-	return store, ""
+	return store
 }
 
 func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, jobs.Store, func(), error) {
