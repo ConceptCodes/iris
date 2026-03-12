@@ -13,6 +13,8 @@ import (
 
 	"iris/internal/constants"
 	"iris/internal/ssrf"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const maxFetchSize = 10 * 1024 * 1024 // 10 MB limit for HTML/sitemap content
@@ -24,12 +26,16 @@ type CachedFetcher struct {
 	retries         int
 	backoff         time.Duration
 	hostConcurrency int
+	maxCacheEntries int
+	hostLimiterTTL  time.Duration
 	store           CacheStore
 	ssrfValidator   *ssrf.Validator
 
-	mu          sync.Mutex
-	cache       map[string]cachedResource
-	hostLimiter map[string]chan struct{}
+	mu           sync.Mutex
+	cache        map[string]cachedResource
+	hostLimiter  map[string]chan struct{}
+	hostLastSeen map[string]time.Time
+	flight       singleflight.Group
 }
 
 type cachedResource struct {
@@ -37,6 +43,7 @@ type cachedResource struct {
 	etag         string
 	lastModified string
 	expiresAt    time.Time
+	lastAccessed time.Time
 }
 
 type FetchResult struct {
@@ -49,6 +56,8 @@ type FetcherOptions struct {
 	Retries         int
 	RetryBackoff    time.Duration
 	HostConcurrency int
+	MaxCacheEntries int
+	HostLimiterTTL  time.Duration
 	Store           CacheStore
 	// SSRFValidator is an optional SSRF validator for URL validation.
 	// If nil, a default secure validator is created for each fetch.
@@ -73,6 +82,12 @@ func NewCachedFetcher(client *http.Client, userAgent string, options FetcherOpti
 	if options.HostConcurrency <= 0 {
 		options.HostConcurrency = constants.DefaultHostConcurrency
 	}
+	if options.MaxCacheEntries <= 0 {
+		options.MaxCacheEntries = 512
+	}
+	if options.HostLimiterTTL <= 0 {
+		options.HostLimiterTTL = 10 * time.Minute
+	}
 	if options.Store == nil {
 		options.Store = NewNoopCacheStore()
 	}
@@ -83,10 +98,13 @@ func NewCachedFetcher(client *http.Client, userAgent string, options FetcherOpti
 		retries:         options.Retries,
 		backoff:         options.RetryBackoff,
 		hostConcurrency: options.HostConcurrency,
+		maxCacheEntries: options.MaxCacheEntries,
+		hostLimiterTTL:  options.HostLimiterTTL,
 		store:           options.Store,
 		ssrfValidator:   options.SSRFValidator,
 		cache:           make(map[string]cachedResource),
 		hostLimiter:     map[string]chan struct{}{},
+		hostLastSeen:    map[string]time.Time{},
 	}
 }
 
@@ -96,9 +114,24 @@ func (f *CachedFetcher) Fetch(ctx context.Context, rawURL string) (FetchResult, 
 		return FetchResult{}, err
 	}
 
+	result, err, _ := f.flight.Do(normalizedURL, func() (any, error) {
+		return f.fetch(ctx, normalizedURL)
+	})
+	if err != nil {
+		return FetchResult{}, err
+	}
+	return result.(FetchResult), nil
+}
+
+func (f *CachedFetcher) fetch(ctx context.Context, normalizedURL string) (FetchResult, error) {
 	now := time.Now().UTC()
 	f.mu.Lock()
+	f.pruneLocked(now)
 	cached, ok := f.cache[normalizedURL]
+	if ok {
+		cached.lastAccessed = now
+		f.cache[normalizedURL] = cached
+	}
 	f.mu.Unlock()
 	if !ok {
 		persisted, found, err := f.store.Get(ctx, normalizedURL)
@@ -106,10 +139,11 @@ func (f *CachedFetcher) Fetch(ctx context.Context, rawURL string) (FetchResult, 
 			return FetchResult{}, err
 		}
 		if found {
+			persisted.lastAccessed = now
 			cached = persisted
 			ok = true
 			f.mu.Lock()
-			f.cache[normalizedURL] = persisted
+			f.setCacheEntryLocked(normalizedURL, persisted, now)
 			f.mu.Unlock()
 		}
 	}
@@ -190,9 +224,10 @@ func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cac
 			etag:         resp.Header.Get(constants.HeaderETag),
 			lastModified: resp.Header.Get(constants.HeaderLastModified),
 			expiresAt:    expirationFromHeaders(resp.Header, now, f.defaultTTL),
+			lastAccessed: now,
 		}
 		f.mu.Lock()
-		f.cache[normalizedURL] = resource
+		f.setCacheEntryLocked(normalizedURL, resource, now)
 		f.mu.Unlock()
 		if err := f.store.Put(ctx, normalizedURL, resource); err != nil {
 			return FetchResult{}, false, 0, err
@@ -209,8 +244,9 @@ func (f *CachedFetcher) fetchOnce(ctx context.Context, normalizedURL string, cac
 		if lastModified := resp.Header.Get(constants.HeaderLastModified); lastModified != "" {
 			cached.lastModified = lastModified
 		}
+		cached.lastAccessed = now
 		f.mu.Lock()
-		f.cache[normalizedURL] = cached
+		f.setCacheEntryLocked(normalizedURL, cached, now)
 		f.mu.Unlock()
 		if err := f.store.Put(ctx, normalizedURL, cached); err != nil {
 			return FetchResult{}, false, 0, err
@@ -249,18 +285,65 @@ func (f *CachedFetcher) acquireHostSlot(ctx context.Context, rawURL string) (fun
 	host := strings.ToLower(parsed.Host)
 
 	f.mu.Lock()
+	f.pruneLocked(time.Now().UTC())
 	limiter, ok := f.hostLimiter[host]
 	if !ok {
 		limiter = make(chan struct{}, f.hostConcurrency)
 		f.hostLimiter[host] = limiter
 	}
+	f.hostLastSeen[host] = time.Now().UTC()
 	f.mu.Unlock()
 
 	select {
 	case limiter <- struct{}{}:
-		return func() { <-limiter }, nil
+		return func() {
+			<-limiter
+			f.mu.Lock()
+			f.hostLastSeen[host] = time.Now().UTC()
+			f.mu.Unlock()
+		}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	}
+}
+
+func (f *CachedFetcher) setCacheEntryLocked(rawURL string, resource cachedResource, now time.Time) {
+	resource.lastAccessed = now
+	f.cache[rawURL] = resource
+	f.pruneLocked(now)
+}
+
+func (f *CachedFetcher) pruneLocked(now time.Time) {
+	for rawURL, resource := range f.cache {
+		if !resource.expiresAt.IsZero() && now.Sub(resource.expiresAt) > f.defaultTTL {
+			delete(f.cache, rawURL)
+		}
+	}
+	for host, lastSeen := range f.hostLastSeen {
+		if now.Sub(lastSeen) > f.hostLimiterTTL {
+			if limiter, ok := f.hostLimiter[host]; ok && len(limiter) == 0 {
+				delete(f.hostLimiter, host)
+				delete(f.hostLastSeen, host)
+			}
+		}
+	}
+	for len(f.cache) > f.maxCacheEntries {
+		var (
+			evictKey  string
+			evictSeen time.Time
+			set       bool
+		)
+		for rawURL, resource := range f.cache {
+			if !set || resource.lastAccessed.Before(evictSeen) {
+				evictKey = rawURL
+				evictSeen = resource.lastAccessed
+				set = true
+			}
+		}
+		if !set {
+			return
+		}
+		delete(f.cache, evictKey)
 	}
 }
 

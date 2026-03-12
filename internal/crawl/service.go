@@ -102,8 +102,8 @@ func (s *Service) SetSourceNextRun(ctx context.Context, id string, next time.Tim
 	return s.store.UpdateSourceNextRun(ctx, id, next)
 }
 
-func (s *Service) ListRuns(ctx context.Context) ([]Run, error) {
-	return s.store.ListRuns(ctx)
+func (s *Service) ListRuns(ctx context.Context, limit int) ([]Run, error) {
+	return s.store.ListRuns(ctx, limit)
 }
 
 func (s *Service) GetRun(ctx context.Context, id string) (Run, error) {

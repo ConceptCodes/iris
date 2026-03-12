@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"iris/config"
+
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -15,7 +17,9 @@ type PostgresStore struct {
 	db *sql.DB
 }
 
-func NewPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
+const defaultRunListLimit = 100
+
+func NewPostgresStore(ctx context.Context, dsn string, pool config.PostgresPool) (*PostgresStore, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("crawl store dsn is required")
 	}
@@ -23,6 +27,7 @@ func NewPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
+	configurePostgresPool(db, pool)
 	store := &PostgresStore{db: db}
 	if err := store.ping(ctx); err != nil {
 		db.Close()
@@ -97,8 +102,11 @@ func (s *PostgresStore) CreateRun(ctx context.Context, sourceID, trigger string,
 	return run, nil
 }
 
-func (s *PostgresStore) ListRuns(ctx context.Context) ([]Run, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, source_id, trigger, status, discovered_count, indexed_count, duplicate_count, failed_count, last_error, scheduled_at, created_at, updated_at FROM crawl_runs ORDER BY created_at DESC`)
+func (s *PostgresStore) ListRuns(ctx context.Context, limit int) ([]Run, error) {
+	if limit <= 0 {
+		limit = defaultRunListLimit
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, source_id, trigger, status, discovered_count, indexed_count, duplicate_count, failed_count, last_error, scheduled_at, created_at, updated_at FROM crawl_runs ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
 	}
@@ -113,6 +121,13 @@ func (s *PostgresStore) ListRuns(ctx context.Context) ([]Run, error) {
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
+}
+
+func configurePostgresPool(db *sql.DB, pool config.PostgresPool) {
+	db.SetMaxOpenConns(pool.MaxOpenConns)
+	db.SetMaxIdleConns(pool.MaxIdleConns)
+	db.SetConnMaxLifetime(pool.ConnMaxLifetime)
+	db.SetConnMaxIdleTime(pool.ConnMaxIdleTime)
 }
 
 func (s *PostgresStore) GetRun(ctx context.Context, id string) (Run, error) {

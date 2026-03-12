@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"iris/config"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -13,7 +15,7 @@ type PostgresCacheStore struct {
 	db *sql.DB
 }
 
-func NewPostgresCacheStore(ctx context.Context, dsn string) (*PostgresCacheStore, error) {
+func NewPostgresCacheStore(ctx context.Context, dsn string, pool config.PostgresPool) (*PostgresCacheStore, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("crawl cache dsn is required")
 	}
@@ -21,6 +23,7 @@ func NewPostgresCacheStore(ctx context.Context, dsn string) (*PostgresCacheStore
 	if err != nil {
 		return nil, fmt.Errorf("open postgres cache: %w", err)
 	}
+	configurePostgresPool(db, pool)
 	store := &PostgresCacheStore{db: db}
 	if err := store.ping(ctx); err != nil {
 		db.Close()

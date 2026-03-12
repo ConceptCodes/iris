@@ -9,7 +9,7 @@ type Store interface {
 	CreateSource(ctx context.Context, input CreateSourceInput) (Source, error)
 	GetSource(ctx context.Context, id string) (Source, error)
 	CreateRun(ctx context.Context, sourceID, trigger string, scheduledAt time.Time) (Run, error)
-	ListRuns(ctx context.Context) ([]Run, error)
+	ListRuns(ctx context.Context, limit int) ([]Run, error)
 	GetRun(ctx context.Context, id string) (Run, error)
 	SetRunDiscovered(ctx context.Context, id string, discovered int) error
 	IncrementRunIndexed(ctx context.Context, id string, delta int) error

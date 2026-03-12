@@ -378,7 +378,7 @@ func TestServiceListRunsAndGetRun(t *testing.T) {
 		t.Fatalf("trigger run: %v", err)
 	}
 
-	runs, err := service.ListRuns(context.Background())
+	runs, err := service.ListRuns(context.Background(), 100)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}

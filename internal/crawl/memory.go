@@ -75,12 +75,16 @@ func (s *MemoryStore) CreateRun(ctx context.Context, sourceID, trigger string, s
 	return run, nil
 }
 
-func (s *MemoryStore) ListRuns(ctx context.Context) ([]Run, error) {
+func (s *MemoryStore) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	out := make([]Run, len(s.runs))
-	copy(out, s.runs)
+	if limit <= 0 || limit > len(s.runs) {
+		limit = len(s.runs)
+	}
+	start := len(s.runs) - limit
+	out := make([]Run, limit)
+	copy(out, s.runs[start:])
 	return out, nil
 }
 
