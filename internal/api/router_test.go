@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"iris/config"
 	"iris/internal/crawl"
 	"iris/internal/jobs"
 	"iris/internal/search"
@@ -287,7 +288,7 @@ func TestBuildAssetStoreReturnsNilForInvalidS3Settings(t *testing.T) {
 }
 
 func TestNewCrawlServiceReturnsMemoryService(t *testing.T) {
-	service, jobStore, cleanup, err := NewCrawlService("memory", "")
+	service, jobStore, cleanup, err := NewCrawlService("memory", "", config.PostgresPool{})
 	if err != nil {
 		t.Fatalf("NewCrawlService: %v", err)
 	}
@@ -309,7 +310,7 @@ func TestNewCrawlServiceReturnsMemoryService(t *testing.T) {
 }
 
 func TestNewCrawlServiceReturnsNilForUnsupportedBackend(t *testing.T) {
-	service, jobStore, cleanup, err := NewCrawlService("unsupported", "")
+	service, jobStore, cleanup, err := NewCrawlService("unsupported", "", config.PostgresPool{})
 	if err != nil {
 		t.Fatalf("expected nil error for unsupported backend, got %v", err)
 	}
@@ -319,7 +320,7 @@ func TestNewCrawlServiceReturnsNilForUnsupportedBackend(t *testing.T) {
 }
 
 func TestNewCrawlServicePostgresFailureReturnsError(t *testing.T) {
-	service, jobStore, cleanup, err := NewCrawlService("postgres", "")
+	service, jobStore, cleanup, err := NewCrawlService("postgres", "", config.PostgresPool{})
 	if err == nil {
 		if cleanup != nil {
 			cleanup()

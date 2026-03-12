@@ -111,6 +111,10 @@ func (s *stubJobStore) MarkFailed(ctx context.Context, id string, err error, ret
 	return jobs.StatusFailed, nil
 }
 
+func (s *stubJobStore) MarkDeadLetter(ctx context.Context, id string, err error) error {
+	return nil
+}
+
 func (s *stubJobStore) Close() error { return nil }
 
 func TestHandlerCreateSourceRequiresService(t *testing.T) {
@@ -182,7 +186,7 @@ func TestHandlerTriggerRunDefaultsTrigger(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", res.Code)
 	}
 
-	runs, err := service.ListRuns(context.Background())
+	runs, err := service.ListRuns(context.Background(), 100)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}

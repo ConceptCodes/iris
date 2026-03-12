@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"iris/config"
 	"iris/internal/assets"
 	"iris/internal/constants"
 	"iris/internal/crawl"
@@ -21,8 +22,8 @@ import (
 )
 
 type AssetsSettings struct {
-	Backend string
-	Bucket  string
+	Backend    string
+	Bucket     string
 	Region     string
 	Endpoint   string
 	AccessKey  string
@@ -190,7 +191,7 @@ func buildAssetStore(cfg AssetsSettings) assets.Store {
 	return store
 }
 
-func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, jobs.Store, func(), error) {
+func NewCrawlService(jobBackend, jobStoreDSN string, pool config.PostgresPool) (*crawl.Service, jobs.Store, func(), error) {
 	var (
 		jobStore   jobs.Store
 		crawlStore crawl.Store
@@ -201,11 +202,11 @@ func NewCrawlService(jobBackend, jobStoreDSN string) (*crawl.Service, jobs.Store
 		jobStore = jobs.NewMemoryStore()
 		crawlStore = crawl.NewMemoryStore()
 	case constants.KeywordPostgres:
-		jobStore, err = jobs.NewPostgresStore(context.Background(), jobStoreDSN)
+		jobStore, err = jobs.NewPostgresStore(context.Background(), jobStoreDSN, pool)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		crawlStore, err = crawl.NewPostgresStore(context.Background(), jobStoreDSN)
+		crawlStore, err = crawl.NewPostgresStore(context.Background(), jobStoreDSN, pool)
 		if err != nil {
 			jobStore.Close()
 			return nil, nil, nil, err

@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -24,6 +26,9 @@ type Handler struct {
 	metrics      *metrics.Counters
 }
 
+const maxJSONBodyBytes = 1 << 20
+const defaultRunsLimit = 100
+
 func NewHandler(engine search.Engine, indexer *indexing.Pipeline, crawlService *crawl.Service, jobStore jobs.Store, metrics *metrics.Counters) *Handler {
 	return &Handler{engine: engine, indexer: indexer, crawlService: crawlService, jobStore: jobStore, metrics: metrics}
 }
@@ -38,7 +43,7 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 	}
 	metrics.IncIndexRequestPrometheus("url")
 	var req models.IndexRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
@@ -61,7 +66,7 @@ func (h *Handler) IndexFromURL(w http.ResponseWriter, r *http.Request) {
 			h.metrics.IncIndexError()
 		}
 		metrics.IncIndexErrorPrometheus("url")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.writeInternalError(w, "index from url failed", err)
 		return
 	}
 	metrics.ObserveIndexLatency("url", time.Since(start))
@@ -92,7 +97,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	buf := make([]byte, header.Size)
-	if _, err := file.Read(buf); err != nil {
+	if _, err := io.ReadFull(file, buf); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncIndexError()
 		}
@@ -121,7 +126,7 @@ func (h *Handler) IndexFromUpload(w http.ResponseWriter, r *http.Request) {
 			h.metrics.IncIndexError()
 		}
 		metrics.IncIndexErrorPrometheus("upload")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.writeInternalError(w, "index from upload failed", err)
 		return
 	}
 	metrics.ObserveIndexLatency("upload", time.Since(start))
@@ -134,7 +139,7 @@ func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
 	}
 	metrics.IncSearchRequestPrometheus("text")
 	var req models.TextSearchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
@@ -157,7 +162,7 @@ func (h *Handler) SearchText(w http.ResponseWriter, r *http.Request) {
 			h.metrics.IncSearchError()
 		}
 		metrics.IncSearchErrorPrometheus("text")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.writeInternalError(w, "search by text failed", err)
 		return
 	}
 	metrics.ObserveSearchLatency("text", time.Since(start))
@@ -193,7 +198,7 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	buf := make([]byte, header.Size)
-	if _, err := file.Read(buf); err != nil {
+	if _, err := io.ReadFull(file, buf); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
@@ -211,7 +216,7 @@ func (h *Handler) SearchImage(w http.ResponseWriter, r *http.Request) {
 			h.metrics.IncSearchError()
 		}
 		metrics.IncSearchErrorPrometheus("image_upload")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.writeInternalError(w, "search by image failed", err)
 		return
 	}
 	metrics.ObserveSearchLatency("image_upload", time.Since(start))
@@ -233,7 +238,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 		Filters map[string]string `json:"filters"`
 		Encoder models.Encoder    `json:"encoder,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		if h.metrics != nil {
 			h.metrics.IncSearchError()
 		}
@@ -256,7 +261,7 @@ func (h *Handler) SearchImageURL(w http.ResponseWriter, r *http.Request) {
 			h.metrics.IncSearchError()
 		}
 		metrics.IncSearchErrorPrometheus("image_url")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.writeInternalError(w, "search by image url failed", err)
 		return
 	}
 	metrics.ObserveSearchLatency("image_url", time.Since(start))
@@ -274,7 +279,7 @@ func (h *Handler) CreateSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req models.CrawlSourceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
@@ -302,7 +307,7 @@ func (h *Handler) TriggerSourceRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req crawl.TriggerRunInput
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	_ = decodeJSONBody(w, r, &req)
 	run, err := h.crawlService.TriggerRun(r.Context(), r.PathValue("id"), req.Trigger)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -321,7 +326,7 @@ func (h *Handler) EnqueueLocalIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req models.LocalIndexRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
@@ -340,7 +345,7 @@ func (h *Handler) EnqueueLocalIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	run, err := h.crawlService.TriggerRun(r.Context(), source.ID, constants.TriggerManual)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.writeInternalError(w, "enqueue local index trigger failed", err)
 		return
 	}
 	if h.metrics != nil {
@@ -359,9 +364,19 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotImplemented, "crawl service unavailable")
 		return
 	}
-	runs, err := h.crawlService.ListRuns(r.Context())
+	limit := defaultRunsLimit
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		limit = parseIntFormValue(raw, defaultRunsLimit)
+		if limit <= 0 {
+			limit = defaultRunsLimit
+		}
+		if limit > 500 {
+			limit = 500
+		}
+	}
+	runs, err := h.crawlService.ListRuns(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.writeInternalError(w, "list runs failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
@@ -394,7 +409,7 @@ func (h *Handler) HandleReindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req models.ReindexRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, constants.MessageInvalidJSON)
 		return
 	}
@@ -418,7 +433,7 @@ func (h *Handler) HandleReindex(w http.ResponseWriter, r *http.Request) {
 
 	images, err := h.engine.ListImages(r.Context(), filters, limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.writeInternalError(w, "list images for reindex failed", err)
 		return
 	}
 
@@ -471,6 +486,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, models.ErrorResponse{Error: message})
+}
+
+func (h *Handler) writeInternalError(w http.ResponseWriter, message string, err error) {
+	slog.Error(message, "error", err)
+	writeError(w, http.StatusInternalServerError, "internal server error")
+}
+
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
 }
 
 func parseIntFormValue(s string, def int) int {
