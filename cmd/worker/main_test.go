@@ -454,7 +454,7 @@ func TestProcessSchedulesAdvancesNextRunAndQueuesRun(t *testing.T) {
 		t.Fatalf("expected next run to be advanced, got %v", updatedSource.NextRunAt)
 	}
 
-	runs, err := service.ListRuns(context.Background())
+	runs, err := service.ListRuns(context.Background(), 100)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}

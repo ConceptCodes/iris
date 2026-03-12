@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -97,7 +98,11 @@ func calculateRetryBackoff(attempt int, baseDelay time.Duration) time.Duration {
 	backoff := baseDelay * time.Duration(1<<(attempt-1))
 
 	// Add jitter: random value from [0, baseDelay * 0.5) to distribute retries
-	jitter := time.Duration(rand.Int63n(int64(baseDelay / 2)))
+	jitterWindow := int64(baseDelay / 2)
+	var jitter time.Duration
+	if jitterWindow > 0 {
+		jitter = time.Duration(rand.Int63n(jitterWindow))
+	}
 	backoff += jitter
 
 	// Cap at maximum delay (5 minutes)
@@ -107,6 +112,20 @@ func calculateRetryBackoff(attempt int, baseDelay time.Duration) time.Duration {
 	}
 
 	return backoff
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		delay = time.Second
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 type crawlerRuntime struct {
@@ -186,7 +205,7 @@ func newJobStore(cfg config.Worker) (jobs.Store, error) {
 	case "memory":
 		return jobs.NewMemoryStore(), nil
 	case "postgres":
-		return jobs.NewPostgresStore(context.Background(), cfg.JobStoreDSN)
+		return jobs.NewPostgresStore(context.Background(), cfg.JobStoreDSN, cfg.PostgresPool)
 	default:
 		return nil, fmt.Errorf("unsupported job backend: %s", cfg.JobBackend)
 	}
@@ -229,7 +248,7 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 		return err
 	}
 	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
-		AssetStore: assetStore,
+		AssetStore:               assetStore,
 		MaxFetchBytes:            cfg.MaxImageBytes,
 		FetchClient:              &http.Client{Timeout: cfg.FetchTimeout},
 		UserAgent:                cfg.UserAgent,
@@ -242,7 +261,14 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	for {
 		job, ok, err := jobStore.LeaseNext(ctx, time.Now().UTC(), cfg.LeaseDuration, jobs.TypeFetchImage, jobs.TypeIndexLocalFile, jobs.TypeReindexImage)
 		if err != nil {
-			return err
+			if ctx.Err() != nil {
+				return nil
+			}
+			slog.Error("lease next failed", "error", err)
+			if err := sleepWithContext(ctx, cfg.JobPollInterval); err != nil {
+				return nil
+			}
+			continue
 		}
 		if !ok {
 			select {
@@ -260,16 +286,33 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 
 			// Classify error and calculate appropriate retry backoff
 			errType := classifyError(err)
-			retryAt := time.Now().UTC().Add(calculateRetryBackoff(job.Attempts+1, cfg.JobPollInterval))
-
-			// Permanent failures go to dead letter queue, transient failures are retried with backoff
+			markStatus := jobs.StatusPending
 			if errType == errorTypePermanent {
-				retryAt = time.Time{} // No retry for permanent errors
-			}
-
-			markStatus, markErr := jobStore.MarkFailed(ctx, job.ID, err, retryAt)
-			if markErr != nil {
-				return markErr
+				if markErr := jobStore.MarkDeadLetter(ctx, job.ID, err); markErr != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					slog.Error("mark dead letter failed", "job_id", job.ID, "error", markErr)
+					if err := sleepWithContext(ctx, cfg.JobPollInterval); err != nil {
+						return nil
+					}
+					continue
+				}
+				markStatus = jobs.StatusDeadLetter
+			} else {
+				retryAt := time.Now().UTC().Add(calculateRetryBackoff(job.Attempts+1, cfg.JobPollInterval))
+				var markErr error
+				markStatus, markErr = jobStore.MarkFailed(ctx, job.ID, err, retryAt)
+				if markErr != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					slog.Error("mark failed failed", "job_id", job.ID, "error", markErr)
+					if err := sleepWithContext(ctx, cfg.JobPollInterval); err != nil {
+						return nil
+					}
+					continue
+				}
 			}
 			if markStatus == jobs.StatusDeadLetter {
 				_ = incrementRunFailedForJob(ctx, crawlStore, job, err)
@@ -279,7 +322,14 @@ func runIndexer(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 		}
 
 		if err := jobStore.MarkSucceeded(ctx, job.ID); err != nil {
-			return err
+			if ctx.Err() != nil {
+				return nil
+			}
+			slog.Error("mark succeeded failed", "job_id", job.ID, "error", err)
+			if err := sleepWithContext(ctx, cfg.JobPollInterval); err != nil {
+				return nil
+			}
+			continue
 		}
 		metrics.IncWorkerJobSucceeded()
 		metrics.ObserveWorkerJobLatency(time.Since(jobStart))
@@ -304,8 +354,17 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 		return err
 	}
 	defer runtime.close()
-	go runtime.runCachePruneLoop(ctx, cfg)
-	go runSchedulerLoop(ctx, cfg, crawl.NewService(crawlStore, jobStore))
+	var background sync.WaitGroup
+	background.Add(2)
+	go func() {
+		defer background.Done()
+		runtime.runCachePruneLoop(ctx, cfg)
+	}()
+	go func() {
+		defer background.Done()
+		runSchedulerLoop(ctx, cfg, crawl.NewService(crawlStore, jobStore))
+	}()
+	defer background.Wait()
 
 	ticker := time.NewTicker(cfg.JobPollInterval)
 	defer ticker.Stop()
@@ -313,7 +372,14 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 	for {
 		job, ok, err := jobStore.LeaseNext(ctx, time.Now().UTC(), cfg.LeaseDuration, jobs.TypeDiscoverSource)
 		if err != nil {
-			return err
+			if ctx.Err() != nil {
+				return nil
+			}
+			slog.Error("lease next failed", "error", err)
+			if err := sleepWithContext(ctx, cfg.JobPollInterval); err != nil {
+				return nil
+			}
+			continue
 		}
 		if !ok {
 			select {
@@ -330,21 +396,42 @@ func runCrawler(ctx context.Context, cfg config.Worker, jobStore jobs.Store) err
 
 			// Classify error and calculate appropriate retry backoff
 			errType := classifyError(err)
-			retryAt := time.Now().UTC().Add(calculateRetryBackoff(job.Attempts+1, cfg.JobPollInterval))
-
-			// Permanent failures go to dead letter queue, transient failures are retried with backoff
 			if errType == errorTypePermanent {
-				retryAt = time.Time{} // No retry for permanent errors
-			}
-
-			if _, markErr := jobStore.MarkFailed(ctx, job.ID, err, retryAt); markErr != nil {
-				return markErr
+				if markErr := jobStore.MarkDeadLetter(ctx, job.ID, err); markErr != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					slog.Error("mark dead letter failed", "job_id", job.ID, "error", markErr)
+					if err := sleepWithContext(ctx, cfg.JobPollInterval); err != nil {
+						return nil
+					}
+					continue
+				}
+			} else {
+				retryAt := time.Now().UTC().Add(calculateRetryBackoff(job.Attempts+1, cfg.JobPollInterval))
+				if _, markErr := jobStore.MarkFailed(ctx, job.ID, err, retryAt); markErr != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					slog.Error("mark failed failed", "job_id", job.ID, "error", markErr)
+					if err := sleepWithContext(ctx, cfg.JobPollInterval); err != nil {
+						return nil
+					}
+					continue
+				}
 			}
 			metrics.IncWorkerJobFailed()
 			continue
 		}
 		if err := jobStore.MarkSucceeded(ctx, job.ID); err != nil {
-			return err
+			if ctx.Err() != nil {
+				return nil
+			}
+			slog.Error("mark succeeded failed", "job_id", job.ID, "error", err)
+			if err := sleepWithContext(ctx, cfg.JobPollInterval); err != nil {
+				return nil
+			}
+			continue
 		}
 		metrics.IncWorkerJobSucceeded()
 		metrics.ObserveWorkerJobLatency(time.Since(jobStart))
@@ -532,7 +619,7 @@ func newCacheStore(cfg config.Worker) (crawl.CacheStore, error) {
 	case "memory":
 		return crawl.NewNoopCacheStore(), nil
 	case "postgres":
-		return crawl.NewPostgresCacheStore(context.Background(), cfg.JobStoreDSN)
+		return crawl.NewPostgresCacheStore(context.Background(), cfg.JobStoreDSN, cfg.PostgresPool)
 	default:
 		return nil, fmt.Errorf("unsupported crawl cache backend: %s", cfg.JobBackend)
 	}
@@ -578,7 +665,7 @@ func newCrawlStore(cfg config.Worker) (crawl.Store, error) {
 	case "memory":
 		return crawl.NewMemoryStore(), nil
 	case "postgres":
-		return crawl.NewPostgresStore(context.Background(), cfg.JobStoreDSN)
+		return crawl.NewPostgresStore(context.Background(), cfg.JobStoreDSN, cfg.PostgresPool)
 	default:
 		return nil, fmt.Errorf("unsupported crawl backend: %s", cfg.JobBackend)
 	}

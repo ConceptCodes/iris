@@ -54,7 +54,7 @@ func main() {
 	}
 
 	engine := search.NewEngine(encoderRegistry, qdrantStore)
-	crawlService, jobStore, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN)
+	crawlService, jobStore, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN, cfg.PostgresPool)
 	if err != nil {
 		slog.Error("failed to initialize crawl service", "error", err)
 	} else if cleanup != nil {
