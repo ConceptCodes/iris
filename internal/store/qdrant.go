@@ -37,9 +37,8 @@ func NewQdrantStore(addr string, dim int, connectTimeout time.Duration) (*Qdrant
 func NewQdrantStoreWithEncoders(addr string, dims map[models.Encoder]int, connectTimeout time.Duration) (*QdrantStore, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
-	conn, err := grpc.DialContext(ctx, addr,
+	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("connect to qdrant: %w", err)
@@ -314,6 +313,9 @@ func (s *QdrantStore) recordToPayload(record models.ImageRecord) map[string]*pb.
 		constants.PayloadFieldURL:      {Kind: &pb.Value_StringValue{StringValue: record.URL}},
 		constants.PayloadFieldFilename: {Kind: &pb.Value_StringValue{StringValue: record.Filename}},
 	}
+	if record.ThumbnailURL != "" {
+		payload["thumbnail_url"] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: record.ThumbnailURL}}
+	}
 	if len(record.Tags) > 0 {
 		tags := make([]*pb.Value, len(record.Tags))
 		for i, t := range record.Tags {
@@ -344,6 +346,11 @@ func (s *QdrantStore) payloadToRecord(payload map[string]*pb.Value) models.Image
 	if v, ok := payload[constants.PayloadFieldFilename]; ok {
 		if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
 			record.Filename = sv.StringValue
+		}
+	}
+	if v, ok := payload["thumbnail_url"]; ok {
+		if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
+			record.ThumbnailURL = sv.StringValue
 		}
 	}
 	if v, ok := payload[constants.PayloadFieldTags]; ok {

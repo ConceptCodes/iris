@@ -174,5 +174,5 @@ func wrapRPCError(operation string, err error) error {
 	if st.Code() == codes.OK {
 		return nil
 	}
-	return fmt.Errorf("%s: %s", operation, st.Message())
+	return fmt.Errorf("%s: %s: %w", operation, st.Message(), err)
 }

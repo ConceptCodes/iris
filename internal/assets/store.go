@@ -1,6 +1,7 @@
 package assets
 
 import (
+	"context"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 // Store is the interface for saving image assets to a remote backend.
 // The only supported implementation is S3Store (backed by AWS S3 or MinIO).
 type Store interface {
-	Save(id, filename string, data []byte) (string, error)
+	Save(ctx context.Context, id, filename string, data []byte) (string, error)
 }
 
 func assetExtension(filename string, data []byte) string {

@@ -234,7 +234,7 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 			// Non-fatal: log and continue without a thumbnail
 			fmt.Fprintf(os.Stderr, "failed to generate thumbnail for %s: %v\n", record.ID, err)
 		} else {
-			thumbURL, err := p.options.AssetStore.Save(record.ID+"_thumb", record.Filename, thumbBytes)
+			thumbURL, err := p.options.AssetStore.Save(ctx, record.ID+"_thumb", record.Filename, thumbBytes)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "failed to save thumbnail for %s: %v\n", record.ID, err)
 			} else {

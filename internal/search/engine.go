@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"reflect"
 
 	"iris/internal/constants"
 	"iris/internal/encoder"
@@ -43,6 +42,8 @@ type engineImpl struct {
 	store    VectorStore
 }
 
+var errSearchUnavailable = fmt.Errorf("search engine unavailable: qdrant store not connected")
+
 func NewEngine(encoders *encoder.Registry, qdrantStore VectorStore) Engine {
 	return &engineImpl{
 		encoders: encoders,
@@ -62,9 +63,9 @@ func (e *engineImpl) IndexFromURL(ctx context.Context, req models.IndexRequest) 
 	)
 	defer span.End()
 
-	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
-		tracing.AddErrorToSpan(span, fmt.Errorf("search engine unavailable: qdrant store not connected"))
-		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
+	if e.store == nil {
+		tracing.AddErrorToSpan(span, errSearchUnavailable)
+		return "", errSearchUnavailable
 	}
 	if existing, ok, err := e.FindExistingID(ctx, req.Meta, req.URL); err != nil {
 		tracing.AddErrorToSpan(span, err)
@@ -102,9 +103,9 @@ func (e *engineImpl) IndexFromBytes(ctx context.Context, imageBytes []byte, reco
 	)
 	defer span.End()
 
-	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
-		tracing.AddErrorToSpan(span, fmt.Errorf("search engine unavailable: qdrant store not connected"))
-		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
+	if e.store == nil {
+		tracing.AddErrorToSpan(span, errSearchUnavailable)
+		return "", errSearchUnavailable
 	}
 	if existing, ok, err := e.FindExistingID(ctx, record.Meta, ""); err != nil {
 		tracing.AddErrorToSpan(span, err)
@@ -129,8 +130,8 @@ func (e *engineImpl) IndexFromBytes(ctx context.Context, imageBytes []byte, reco
 }
 
 func (e *engineImpl) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
-	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
-		return "", fmt.Errorf("search engine unavailable: qdrant store not connected")
+	if e.store == nil {
+		return "", errSearchUnavailable
 	}
 	if record.ID == "" {
 		if existing, ok, err := e.FindExistingID(ctx, record.Meta, ""); err != nil {
@@ -157,9 +158,9 @@ func (e *engineImpl) SearchByText(ctx context.Context, req models.TextSearchRequ
 	)
 	defer span.End()
 
-	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
-		tracing.AddErrorToSpan(span, fmt.Errorf("search engine unavailable: qdrant store not connected"))
-		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	if e.store == nil {
+		tracing.AddErrorToSpan(span, errSearchUnavailable)
+		return nil, errSearchUnavailable
 	}
 	topK := req.TopK
 	if topK == 0 {
@@ -193,9 +194,9 @@ func (e *engineImpl) SearchByImageBytes(ctx context.Context, imageBytes []byte, 
 	)
 	defer span.End()
 
-	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
-		tracing.AddErrorToSpan(span, fmt.Errorf("search engine unavailable: qdrant store not connected"))
-		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	if e.store == nil {
+		tracing.AddErrorToSpan(span, errSearchUnavailable)
+		return nil, errSearchUnavailable
 	}
 	if topK == 0 {
 		topK = defaultTopK
@@ -220,8 +221,8 @@ func (e *engineImpl) SearchByImageBytes(ctx context.Context, imageBytes []byte, 
 }
 
 func (e *engineImpl) SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error) {
-	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
-		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	if e.store == nil {
+		return nil, errSearchUnavailable
 	}
 	if topK == 0 {
 		topK = defaultTopK
@@ -239,8 +240,8 @@ func (e *engineImpl) SearchByImageURL(ctx context.Context, url string, topK int,
 }
 
 func (e *engineImpl) GetSimilar(ctx context.Context, id string, topK int, enc models.Encoder) ([]models.SearchResult, error) {
-	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
-		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	if e.store == nil {
+		return nil, errSearchUnavailable
 	}
 	if topK == 0 {
 		topK = defaultTopK
@@ -285,8 +286,8 @@ func (e *engineImpl) FindExistingID(ctx context.Context, meta map[string]string,
 }
 
 func (e *engineImpl) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
-	if e.store == nil || reflect.ValueOf(e.store).IsNil() {
-		return nil, fmt.Errorf("search engine unavailable: qdrant store not connected")
+	if e.store == nil {
+		return nil, errSearchUnavailable
 	}
 	return e.store.ListImages(ctx, filters, limit, offset)
 }

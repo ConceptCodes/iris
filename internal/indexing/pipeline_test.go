@@ -54,7 +54,7 @@ type failingAssetStore struct {
 	err error
 }
 
-func (s failingAssetStore) Save(id, filename string, data []byte) (string, error) {
+func (s failingAssetStore) Save(ctx context.Context, id, filename string, data []byte) (string, error) {
 	return "", s.err
 }
 
@@ -278,7 +278,7 @@ func TestPipelineIndexUploadedBytesSucceedsEvenIfAssetStoreFails(t *testing.T) {
 	// Thumbnail save failures are non-fatal: the pipeline logs and continues.
 	engine := &mockEngine{id: "upload-id"}
 	pipeline := NewPipelineWithOptions(engine, PipelineOptions{
-		AssetStore: failingAssetStore{err: errors.New("disk full")},
+		AssetStore:     failingAssetStore{err: errors.New("disk full")},
 		ThumbnailWidth: 0, // Disable thumbnail generation so we reach the store call
 	})
 

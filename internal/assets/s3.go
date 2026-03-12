@@ -91,13 +91,13 @@ func loadAWSConfig(ctx context.Context, cfg S3Config) (aws.Config, error) {
 	return config.LoadDefaultConfig(ctx, options...)
 }
 
-func (s *S3Store) Save(id, filename string, data []byte) (string, error) {
+func (s *S3Store) Save(ctx context.Context, id, filename string, data []byte) (string, error) {
 	if id == "" {
 		return "", fmt.Errorf("asset id is required")
 	}
 	key := s.objectKey(id, filename, data)
 	contentType := http.DetectContentType(data)
-	_, err := s.client.PutObject(context.Background(), &s3.PutObjectInput{
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(data),
