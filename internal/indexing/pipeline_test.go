@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"iris/internal/constants"
+	"iris/internal/metadata"
 	"iris/pkg/models"
 )
 
@@ -56,6 +57,15 @@ type failingAssetStore struct {
 
 func (s failingAssetStore) Save(ctx context.Context, id, filename string, data []byte) (string, error) {
 	return "", s.err
+}
+
+type stubEnricher struct {
+	result metadata.Result
+	err    error
+}
+
+func (s stubEnricher) Enrich(ctx context.Context, imageBytes []byte, record models.ImageRecord) (metadata.Result, error) {
+	return s.result, s.err
 }
 
 func TestPipelineIndexFromURL(t *testing.T) {
@@ -133,6 +143,47 @@ func TestPipelineIndexUploadedBytesSkipsAssetForDuplicate(t *testing.T) {
 	}
 	if result.ID != "existing-id" {
 		t.Fatalf("unexpected existing id: %s", result.ID)
+	}
+}
+
+func TestPipelineIndexUploadedBytesAppliesEnrichment(t *testing.T) {
+	engine := &mockEngine{id: "upload-id"}
+	pipeline := NewPipelineWithOptions(engine, PipelineOptions{
+		Enricher: stubEnricher{
+			result: metadata.Result{
+				Tags: []string{"receipt", "text"},
+				Meta: map[string]string{
+					"caption":  "a receipt on a table",
+					"ocr_text": "total 42.19",
+				},
+			},
+		},
+	})
+
+	id, err := pipeline.IndexUploadedBytes(
+		context.Background(),
+		[]byte("image-bytes"),
+		"receipt.png",
+		[]string{"finance"},
+		map[string]string{"source": "upload"},
+	)
+	if err != nil {
+		t.Fatalf("index upload with enrichment: %v", err)
+	}
+	if id != "upload-id" {
+		t.Fatalf("unexpected id: %s", id)
+	}
+	if engine.lastRecord == nil {
+		t.Fatal("expected indexed record")
+	}
+	if got := engine.lastRecord.Meta["caption"]; got != "a receipt on a table" {
+		t.Fatalf("unexpected caption: %q", got)
+	}
+	if got := engine.lastRecord.Meta["ocr_text"]; got != "total 42.19" {
+		t.Fatalf("unexpected ocr_text: %q", got)
+	}
+	if len(engine.lastRecord.Tags) != 3 {
+		t.Fatalf("expected 3 tags, got %v", engine.lastRecord.Tags)
 	}
 }
 

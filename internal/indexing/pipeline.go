@@ -16,6 +16,7 @@ import (
 
 	"iris/internal/assets"
 	"iris/internal/constants"
+	"iris/internal/metadata"
 	"iris/internal/metrics"
 	"iris/internal/ssrf"
 	"iris/pkg/models"
@@ -51,6 +52,7 @@ type Pipeline struct {
 
 type PipelineOptions struct {
 	AssetStore               assets.Store
+	Enricher                 metadata.Enricher
 	MaxFetchBytes            int
 	FetchClient              *http.Client
 	UserAgent                string
@@ -226,6 +228,22 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 		if ok {
 			metrics.IncDedupeEvent(dedupeReason(record.Meta))
 			return Result{ID: existing, Status: ResultStatusDuplicate}, nil
+		}
+	}
+	if p.options.Enricher != nil {
+		enrichment, err := p.options.Enricher.Enrich(ctx, imageBytes, record)
+		if err != nil {
+			return Result{}, fmt.Errorf("enrich metadata: %w", err)
+		}
+		record.Tags = metadata.MergeTags(record.Tags, enrichment.Tags)
+		if record.Meta == nil {
+			record.Meta = map[string]string{}
+		}
+		for key, value := range enrichment.Meta {
+			if strings.TrimSpace(value) == "" {
+				continue
+			}
+			record.Meta[key] = value
 		}
 	}
 	if p.options.AssetStore != nil && p.options.ThumbnailWidth > 0 {
