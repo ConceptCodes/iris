@@ -1,3 +1,6 @@
+// Package indexing provides a pipeline for ingesting and processing images
+// from URLs, uploads, and local files with metadata enrichment,
+// quality scoring, deduplication, and thumbnail generation.
 package indexing
 
 import (
@@ -13,11 +16,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"iris/internal/assets"
 	"iris/internal/constants"
+	errpkg "iris/internal/error"
 	"iris/internal/metadata"
 	"iris/internal/metrics"
+	"iris/internal/quality"
 	"iris/internal/ssrf"
 	"iris/pkg/models"
 
@@ -246,6 +252,19 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 			record.Meta[key] = value
 		}
 	}
+	// Populate quality signals
+	analyzer := quality.NewDefaultAnalyzer()
+	signals, analyzeErr := analyzer.Analyze(ctx, imageBytes)
+	if analyzeErr == nil && signals.Width > 0 {
+		record.ImageWidth = signals.Width
+		record.ImageHeight = signals.Height
+		record.ColorDepth = signals.ColorDepth
+		record.QualityScore = signals.EntropyScore
+	}
+	// Always set file size
+	record.FileSize = int64(len(imageBytes))
+	// Set indexed timestamp
+	record.IndexedAt = time.Now().UTC().Format(time.RFC3339)
 	if p.options.AssetStore != nil && p.options.ThumbnailWidth > 0 {
 		thumbBytes, err := p.generateThumbnail(imageBytes)
 		if err != nil {
@@ -344,7 +363,7 @@ func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, ma
 	}
 	contentType := strings.ToLower(resp.Header.Get(constants.HeaderContentType))
 	if contentType != "" && !strings.HasPrefix(contentType, constants.MIMETypeImagePrefix) {
-		return nil, "", fmt.Errorf("unsupported content type: %s", contentType)
+		return nil, "", errpkg.ErrUnsupportedContentType.ErrorWith(fmt.Errorf("content type: %s", contentType))
 	}
 	limited := io.LimitReader(resp.Body, int64(maxBytes+1))
 	buf, err := io.ReadAll(limited)
@@ -352,12 +371,12 @@ func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, ma
 		return nil, "", fmt.Errorf("read image bytes: %w", err)
 	}
 	if len(buf) > maxBytes {
-		return nil, "", fmt.Errorf("image exceeds %d bytes limit", maxBytes)
+		return nil, "", errpkg.ErrImageExceedsLimit.ErrorWith(fmt.Errorf("size: %d bytes exceeds limit: %d bytes", len(buf), maxBytes))
 	}
 	if contentType == "" {
 		detected := http.DetectContentType(buf)
 		if !strings.HasPrefix(detected, constants.MIMETypeImagePrefix) {
-			return nil, "", fmt.Errorf("unsupported content type: %s", detected)
+			return nil, "", errpkg.ErrUnsupportedContentType.ErrorWith(fmt.Errorf("detected content type: %s", detected))
 		}
 		contentType = detected
 	}
