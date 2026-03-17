@@ -1,0 +1,67 @@
+# golangci-lint configuration
+# https://golangci-lint.run/usage/configuration/
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Vet examines Go source code
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Static analysis checks
+    - unused        # Check for unused code
+    - gofmt         # Check gofmt formatting
+    - goimports     # Check goimports formatting
+    - misspell      # Find commonly misspelled words
+    - revive        # Fast, configurable, extensible linter
+    - gosec         # Security-focused linter
+
+linters-settings:
+  errcheck:
+    # Check type assertions (x.(type))
+    check-type-assertions: true
+    # Check blank error assignments (_ = err)
+    check-blank: true
+
+  govet:
+    enable-all: true
+    disable:
+      - shadow      # Can be too noisy
+
+  staticcheck:
+    checks: ["all"]
+
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+        arguments:
+          - "checkPrivateReceivers"
+          - "sayRepetitiveInsteadOfStutters"
+
+issues:
+  # Maximum issues count per linter
+  max-issues-per-linter: 50
+  
+  # Maximum count of issues with the same text
+  max-same-issues: 3
+
+  # Exclude some linters from running on tests files
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+  
+  # Which dirs to skip
+  skip-dirs:
+    - vendor
+    - proto
+    - web/templates
+  
+  # Which files to skip
+  skip-files:
+    - ".*\\.pb\\.go$"
