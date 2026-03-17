@@ -1,12 +1,15 @@
 ![preview](assets/preview.png)
 
-`iris` is a Go image search engine with a Google Images-style UI.
+`iris` is a production-grade image search engine with a Google Images-style UI, featuring **hybrid semantic + contextual ranking** to match Google Images' result relevance.
+
+### Core Features
 
 - **Text-to-Image Search**: Find images using natural language queries.
 - **Reverse Image Search**: Find visually similar images via upload or URL.
 - **Smart Indexing**: Crawl remote URLs, domains, sitemaps, or local directories.
 - **Multi-Encoder Retrieval**: Index with multiple vision encoders and select the encoder used at search time.
 - **High Performance**: Powered by Python encoder sidecars and Qdrant vector database.
+- **Hybrid Re-Ranking**: Beyond pure vector similarity—combines visual semantics with domain authority, image quality, and freshness signals (inspired by Google Images architecture).
 
 ## Architecture
 
@@ -104,6 +107,49 @@ This updates:
 
 - Go stubs in `internal/clip/clipv1`
 - Python stubs in `clip_service/clip/v1`
+
+## Hybrid Re-Ranking Strategy
+
+Unlike pure vector similarity search, **iris** applies a weighted hybrid ranking formula inspired by Google Images:
+
+```
+final_score = (0.50 × similarity) + (0.20 × authority) + (0.15 × quality) + (0.15 × freshness)
+```
+
+### Ranking Signals
+
+| Signal | Weight | What It Measures |
+|--------|--------|------------------|
+| **Visual Similarity** | 50% | Cosine distance between image embeddings (CLIP/SigLIP2) |
+| **Domain Authority** | 20% | Image count per source domain (crawler-derived, no external APIs) |
+| **Image Quality** | 15% | Resolution, color depth, composition (entropy)—computed at index time |
+| **Freshness** | 15% | Time-decay based on index date (1.0 if < 7 days, exponential decay after) |
+
+### Key Tradeoffs
+
+- **Why crawler-derived authority?** Avoids external APIs, works offline. Reflects domain *volume*, not *quality*.
+- **Why compute quality at index time?** Zero search latency. Quality scores are static per image.
+- **Why no user engagement signals?** Privacy-first approach (no tracking). Cannot learn user preferences from clicks.
+- **Why no domain overrides?** Scales to millions of domains automatically. Cannot manually boost/demote specific sources.
+
+### Tuning
+
+All parameters live in `internal/constants/constants.go`:
+
+```go
+const (
+	MaxImageCountPerDomain  = 10000        // Authority ceiling
+	RankingWeightSimilarity = 0.50         // Locked by constraint
+	RankingWeightAuthority  = 0.20
+	RankingWeightQuality    = 0.15
+	RankingWeightFreshness  = 0.15
+	FreshnessDays           = 7
+)
+```
+
+To adjust: modify weights (must sum to 1.0), rebuild, new images use updated values.
+
+
 
 ## Scaling Notes
 
