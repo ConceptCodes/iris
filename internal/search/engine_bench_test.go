@@ -39,6 +39,8 @@ func BenchmarkEngineSearchByText(b *testing.B) {
 	engine := NewEngine(
 		mustBenchRegistry(b, &mockClip{emb: benchmarkEmbedding(768)}),
 		&mockStore{res: benchmarkResults(40)},
+		nil,
+		nil,
 	)
 	req := models.TextSearchRequest{
 		Query: "golden retriever on a beach",
@@ -62,6 +64,8 @@ func BenchmarkEngineSearchByImageBytes(b *testing.B) {
 	engine := NewEngine(
 		mustBenchRegistry(b, &mockClip{emb: benchmarkEmbedding(768)}),
 		&mockStore{res: benchmarkResults(40)},
+		nil,
+		nil,
 	)
 	imageBytes := make([]byte, 256*1024)
 	for i := range imageBytes {
@@ -90,6 +94,8 @@ func BenchmarkEngineIndexFromBytes(b *testing.B) {
 		engine := NewEngine(
 			mustBenchRegistry(b, &mockClip{emb: benchmarkEmbedding(768)}),
 			&mockStore{id: "new-id"},
+			nil,
+			nil,
 		)
 
 		b.SetBytes(int64(len(imageBytes)))
@@ -112,6 +118,8 @@ func BenchmarkEngineIndexFromBytes(b *testing.B) {
 		engine := NewEngine(
 			mustBenchRegistry(b, &mockClip{emb: benchmarkEmbedding(768)}),
 			&mockStore{findID: "existing-id", findOK: true},
+			nil,
+			nil,
 		)
 
 		b.SetBytes(int64(len(imageBytes)))

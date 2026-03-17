@@ -1,3 +1,13 @@
+// Package search provides image search functionality with hybrid ranking.
+//
+// The search engine combines vector similarity with domain authority, image quality,
+// and freshness signals to rank results. This multi-signal approach is inspired by
+// Google Images architecture and provides more relevant results than pure vector
+// similarity alone.
+//
+// The engine supports text-to-image search (using CLIP/SigLIP embeddings), reverse
+// image search (visual similarity), and metadata-based filtering. Ranking weights
+// can be configured via constants to tune the relative importance of each signal.
 package search
 
 import (
@@ -5,6 +15,7 @@ import (
 	"fmt"
 	"math"
 
+	"iris/internal/authority"
 	"iris/internal/constants"
 	"iris/internal/encoder"
 	"iris/internal/tracing"
@@ -40,14 +51,24 @@ type VectorStore interface {
 type engineImpl struct {
 	encoders *encoder.Registry
 	store    VectorStore
+	ranker   *Ranker
+	tracker  authority.Tracker
 }
 
 var errSearchUnavailable = fmt.Errorf("search engine unavailable: qdrant store not connected")
 
-func NewEngine(encoders *encoder.Registry, qdrantStore VectorStore) Engine {
+// NewEngine creates a new search engine with the provided components.
+//
+// The encoders parameter provides access to registered embedding models (CLIP, SigLIP2).
+// The qdrantStore handles vector persistence and retrieval. The ranker applies hybrid
+// scoring combining similarity, authority, quality, and freshness. The tracker maintains
+// domain authority data derived from crawled image counts.
+func NewEngine(encoders *encoder.Registry, qdrantStore VectorStore, ranker *Ranker, tracker authority.Tracker) Engine {
 	return &engineImpl{
 		encoders: encoders,
 		store:    qdrantStore,
+		ranker:   ranker,
+		tracker:  tracker,
 	}
 }
 
@@ -90,6 +111,9 @@ func (e *engineImpl) IndexFromURL(ctx context.Context, req models.IndexRequest) 
 		tracing.AddErrorToSpan(span, err)
 		return "", err
 	}
+	if e.tracker != nil {
+		e.tracker.RecordDomain(ctx, req.URL)
+	}
 	return id, nil
 }
 
@@ -125,6 +149,9 @@ func (e *engineImpl) IndexFromBytes(ctx context.Context, imageBytes []byte, reco
 	if err != nil {
 		tracing.AddErrorToSpan(span, err)
 		return "", err
+	}
+	if e.tracker != nil && record.URL != "" {
+		e.tracker.RecordDomain(ctx, record.URL)
 	}
 	return id, nil
 }
@@ -182,6 +209,10 @@ func (e *engineImpl) SearchByText(ctx context.Context, req models.TextSearchRequ
 		tracing.AddErrorToSpan(span, err)
 		return nil, err
 	}
+	// Apply hybrid re-ranking
+	if e.ranker != nil {
+		results = e.ranker.RankResults(ctx, results)
+	}
 	return results, nil
 }
 
@@ -217,6 +248,10 @@ func (e *engineImpl) SearchByImageBytes(ctx context.Context, imageBytes []byte, 
 		tracing.AddErrorToSpan(span, err)
 		return nil, err
 	}
+	// Apply hybrid re-ranking
+	if e.ranker != nil {
+		results = e.ranker.RankResults(ctx, results)
+	}
 	return results, nil
 }
 
@@ -236,7 +271,15 @@ func (e *engineImpl) SearchByImageURL(ctx context.Context, url string, topK int,
 		return nil, err
 	}
 	normalize(embedding)
-	return e.store.Search(ctx, encoderName, embedding, topK, filters)
+	results, err := e.store.Search(ctx, encoderName, embedding, topK, filters)
+	if err != nil {
+		return nil, err
+	}
+	// Apply hybrid re-ranking
+	if e.ranker != nil {
+		results = e.ranker.RankResults(ctx, results)
+	}
+	return results, nil
 }
 
 func (e *engineImpl) GetSimilar(ctx context.Context, id string, topK int, enc models.Encoder) ([]models.SearchResult, error) {
@@ -254,7 +297,15 @@ func (e *engineImpl) GetSimilar(ctx context.Context, id string, topK int, enc mo
 	if err != nil {
 		return nil, err
 	}
-	return e.store.Search(ctx, encoderName, embedding, topK+1, nil)
+	results, err := e.store.Search(ctx, encoderName, embedding, topK+1, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Apply hybrid re-ranking
+	if e.ranker != nil {
+		results = e.ranker.RankResults(ctx, results)
+	}
+	return results, nil
 }
 
 func (e *engineImpl) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {

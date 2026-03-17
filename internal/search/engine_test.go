@@ -46,7 +46,7 @@ func TestNormalize(t *testing.T) {
 }
 
 func TestEngineOffline(t *testing.T) {
-	engine := NewEngine(mustTestRegistry(t, &mockClip{}), nil)
+	engine := NewEngine(mustTestRegistry(t, &mockClip{}), nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -132,7 +132,7 @@ func TestEngine_IndexFromURL(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		mc := &mockClip{emb: models.Embedding{1.0, 0.0}}
 		ms := &mockStore{id: "new-id"}
-		e := NewEngine(mustTestRegistry(t, mc), ms)
+		e := NewEngine(mustTestRegistry(t, mc), ms, nil, nil)
 
 		id, err := e.IndexFromURL(context.Background(), models.IndexRequest{URL: "http://x", Filename: "x.jpg"})
 		if err != nil {
@@ -149,7 +149,7 @@ func TestEngine_IndexFromURL(t *testing.T) {
 		}
 	})
 	t.Run("clip error", func(t *testing.T) {
-		e := NewEngine(mustTestRegistry(t, &mockClip{err: fmt.Errorf("clip fail")}), &mockStore{})
+		e := NewEngine(mustTestRegistry(t, &mockClip{err: fmt.Errorf("clip fail")}), &mockStore{}, nil, nil)
 		_, err := e.IndexFromURL(context.Background(), models.IndexRequest{URL: "http://x"})
 		if err == nil || err.Error() != "clip embed image url: clip fail" {
 			t.Errorf("expected wrapped clip fail, got %v", err)
@@ -160,7 +160,7 @@ func TestEngine_IndexFromURL(t *testing.T) {
 func TestEngine_IndexFromBytes(t *testing.T) {
 	t.Run("auto id", func(t *testing.T) {
 		ms := &mockStore{}
-		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms)
+		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms, nil, nil)
 		e.IndexFromBytes(context.Background(), []byte("data"), models.ImageRecord{})
 		if ms.lastRecord.ID == "" {
 			t.Errorf("UUID not generated")
@@ -168,7 +168,7 @@ func TestEngine_IndexFromBytes(t *testing.T) {
 	})
 	t.Run("provided id", func(t *testing.T) {
 		ms := &mockStore{}
-		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms)
+		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms, nil, nil)
 		e.IndexFromBytes(context.Background(), []byte("data"), models.ImageRecord{ID: "my-id"})
 		if ms.lastRecord.ID != "my-id" {
 			t.Errorf("provided ID overwritten")
@@ -176,7 +176,7 @@ func TestEngine_IndexFromBytes(t *testing.T) {
 	})
 	t.Run("dedupe returns existing", func(t *testing.T) {
 		ms := &mockStore{findID: "existing", findOK: true}
-		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms)
+		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms, nil, nil)
 		id, err := e.IndexFromBytes(context.Background(), []byte("data"), models.ImageRecord{Meta: map[string]string{"content_sha256": "abc"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -188,7 +188,7 @@ func TestEngine_IndexFromBytes(t *testing.T) {
 
 	t.Run("FindExistingID passthrough", func(t *testing.T) {
 		ms := &mockStore{findID: "existing", findOK: true}
-		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms)
+		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms, nil, nil)
 		id, ok, err := e.FindExistingID(context.Background(), map[string]string{"content_sha256": "abc"}, "")
 		if err != nil || !ok || id != "existing" {
 			t.Fatalf("unexpected result: id=%s ok=%v err=%v", id, ok, err)
@@ -199,14 +199,14 @@ func TestEngine_IndexFromBytes(t *testing.T) {
 func TestEngine_SearchByText(t *testing.T) {
 	t.Run("default topK", func(t *testing.T) {
 		ms := &mockStore{}
-		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms)
+		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms, nil, nil)
 		e.SearchByText(context.Background(), models.TextSearchRequest{})
 		if ms.lastTopK != defaultTopK {
 			t.Errorf("expected default topK, got %d", ms.lastTopK)
 		}
 	})
 	t.Run("clip error", func(t *testing.T) {
-		e := NewEngine(mustTestRegistry(t, &mockClip{err: fmt.Errorf("fail")}), &mockStore{})
+		e := NewEngine(mustTestRegistry(t, &mockClip{err: fmt.Errorf("fail")}), &mockStore{}, nil, nil)
 		_, err := e.SearchByText(context.Background(), models.TextSearchRequest{})
 		if err == nil {
 			t.Errorf("expected error")
@@ -221,7 +221,7 @@ func TestEngine_IndexFromBytesStoresAllEncoderEmbeddings(t *testing.T) {
 	engine := NewEngine(mustNamedRegistry(t, models.EncoderCLIP, map[models.Encoder]encoder.Client{
 		models.EncoderCLIP:    clipClient,
 		models.EncoderSigLIP2: siglipClient,
-	}), store)
+	}), store, nil, nil)
 
 	id, err := engine.IndexFromBytes(context.Background(), []byte("data"), models.ImageRecord{Filename: "photo.jpg"})
 	if err != nil {
@@ -248,7 +248,7 @@ func TestEngine_SearchByTextUsesRequestedEncoder(t *testing.T) {
 	engine := NewEngine(mustNamedRegistry(t, models.EncoderCLIP, map[models.Encoder]encoder.Client{
 		models.EncoderCLIP:    clipClient,
 		models.EncoderSigLIP2: siglipClient,
-	}), store)
+	}), store, nil, nil)
 
 	_, err := engine.SearchByText(context.Background(), models.TextSearchRequest{
 		Query:   "mountain lake",
@@ -270,7 +270,7 @@ func TestEngine_SearchByTextUsesRequestedEncoder(t *testing.T) {
 
 func TestEngine_SearchByImageBytes(t *testing.T) {
 	ms := &mockStore{}
-	e := NewEngine(mustTestRegistry(t, &mockClip{}), ms)
+	e := NewEngine(mustTestRegistry(t, &mockClip{}), ms, nil, nil)
 	e.SearchByImageBytes(context.Background(), nil, 5, map[string]string{"k": "v"}, "")
 	if ms.lastTopK != 5 {
 		t.Errorf("topK not forwarded")
@@ -286,7 +286,7 @@ func TestEngine_SearchByImageBytes(t *testing.T) {
 
 func TestEngine_SearchByImageURL(t *testing.T) {
 	ms := &mockStore{}
-	e := NewEngine(mustTestRegistry(t, &mockClip{}), ms)
+	e := NewEngine(mustTestRegistry(t, &mockClip{}), ms, nil, nil)
 	e.SearchByImageURL(context.Background(), "x", 0, nil, "")
 	if ms.lastTopK != defaultTopK {
 		t.Errorf("default topK not applied")
@@ -296,14 +296,14 @@ func TestEngine_SearchByImageURL(t *testing.T) {
 func TestEngine_GetSimilar(t *testing.T) {
 	t.Run("success topK+1", func(t *testing.T) {
 		ms := &mockStore{}
-		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms)
+		e := NewEngine(mustTestRegistry(t, &mockClip{}), ms, nil, nil)
 		e.GetSimilar(context.Background(), "1", 5, "")
 		if ms.lastTopK != 6 {
 			t.Errorf("did not query topK+1")
 		}
 	})
 	t.Run("store get vector error", func(t *testing.T) {
-		e := NewEngine(mustTestRegistry(t, &mockClip{}), &mockStore{err: fmt.Errorf("fail")})
+		e := NewEngine(mustTestRegistry(t, &mockClip{}), &mockStore{err: fmt.Errorf("fail")}, nil, nil)
 		_, err := e.GetSimilar(context.Background(), "1", 5, "")
 		if err == nil {
 			t.Errorf("expected error")
