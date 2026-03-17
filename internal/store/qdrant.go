@@ -1,3 +1,5 @@
+// Package store provides a Qdrant vector database client for storing
+// and searching image embeddings with multi-encoder support.
 package store
 
 import (
@@ -11,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"iris/internal/constants"
+	errpkg "iris/internal/error"
 	"iris/internal/tracing"
 	"iris/pkg/models"
 
@@ -41,7 +44,7 @@ func NewQdrantStoreWithEncoders(addr string, dims map[models.Encoder]int, connec
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("connect to qdrant: %w", err)
+		return nil, errpkg.ErrInternalServer.ErrorWith(fmt.Errorf("connect to qdrant: %w", err))
 	}
 	store := &QdrantStore{
 		conn:        conn,

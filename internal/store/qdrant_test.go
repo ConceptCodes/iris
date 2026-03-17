@@ -152,9 +152,9 @@ type mockPointsClient struct {
 	scrollResp *pb.ScrollResponse
 	scrollErr  error
 
-	lastTopK   uint64
-	lastFilter *pb.Filter
-	lastVectorName string
+	lastTopK        uint64
+	lastFilter      *pb.Filter
+	lastVectorName  string
 	lastNamedUpsert bool
 }
 
@@ -251,7 +251,7 @@ func TestQdrantStore_DataOperations(t *testing.T) {
 		mc := &mockPointsClient{}
 		s := &QdrantStore{points: mc, legacyClip: true}
 		_, err := s.Upsert(context.Background(), models.ImageRecord{ID: "x"}, models.Embeddings{
-			models.EncoderCLIP: {1.0},
+			models.EncoderCLIP:    {1.0},
 			models.EncoderSigLIP2: {2.0},
 		})
 		if err != nil {
