@@ -1,3 +1,5 @@
+// Package tracing provides OpenTelemetry initialization and span helpers
+// for distributed tracing across indexing, search, and crawl operations.
 package tracing
 
 import (

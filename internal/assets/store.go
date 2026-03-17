@@ -1,3 +1,6 @@
+// Package assets provides an interface for storing image assets to remote backends.
+// It supports S3-compatible storage (AWS S3 or MinIO) with automatic
+// MIME type detection and extension handling.
 package assets
 
 import (

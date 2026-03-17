@@ -1,3 +1,6 @@
+// Package constants defines application-wide constants for HTTP, timeouts,
+// file size limits, ranking weights, and other configuration values.
+// These values control behavior across indexing, search, and crawling components.
 package constants
 
 import "time"
@@ -125,6 +128,16 @@ const (
 	DefaultLimit100        = 100
 	DefaultLimit300        = 300
 	CachePruneBatch        = 500
+)
+
+// Ranking & Authority
+const (
+	MaxImageCountPerDomain  = 10000
+	RankingWeightSimilarity = 0.50
+	RankingWeightAuthority  = 0.20
+	RankingWeightQuality    = 0.15
+	RankingWeightFreshness  = 0.15
+	FreshnessDays           = 7
 )
 
 // Ports

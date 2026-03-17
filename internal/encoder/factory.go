@@ -1,3 +1,5 @@
+// Package encoder provides a factory and registry for managing multiple
+// vision encoder clients (CLIP, SigLIP2) with runtime encoder selection.
 package encoder
 
 import (

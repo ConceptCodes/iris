@@ -1,3 +1,6 @@
+// Package api provides HTTP handlers for image search and indexing endpoints.
+// It handles text and reverse image search, image indexing from URLs and uploads,
+// crawl source management, and metrics collection with integrated monitoring.
 package api
 
 import (

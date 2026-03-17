@@ -11,6 +11,7 @@ import (
 
 	"iris/config"
 	"iris/internal/api"
+	"iris/internal/authority"
 	"iris/internal/constants"
 	"iris/internal/encoder"
 	"iris/internal/search"
@@ -53,7 +54,10 @@ func main() {
 		defer qdrantStore.Close()
 	}
 
-	engine := search.NewEngine(encoderRegistry, qdrantStore)
+	// Initialize ranker for hybrid scoring
+	ranker := search.NewRanker(&search.DefaultAuthorityTracker{})
+	tracker := authority.NewMemoryStore(nil)
+	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
 	crawlService, jobStore, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN, cfg.PostgresPool)
 	if err != nil {
 		slog.Error("failed to initialize crawl service", "error", err)

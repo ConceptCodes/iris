@@ -1,3 +1,6 @@
+// Package jobs defines types and interfaces for background job processing.
+// It provides job queue abstractions for crawl discovery, image fetching,
+// local file indexing, and reindexing operations.
 package jobs
 
 import (

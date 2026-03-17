@@ -1,3 +1,5 @@
+// Package metrics provides Prometheus instrumentation for search, indexing,
+// crawling, and worker job operations with counters and histograms.
 package metrics
 
 import (

@@ -1,3 +1,6 @@
+// Package clip provides a gRPC client for vision encoder services.
+// It connects to CLIP and SigLIP2 embedding services to generate vector
+// embeddings for text and images used in similarity search.
 package clip
 
 import (

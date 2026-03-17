@@ -1,3 +1,6 @@
+// Package web provides HTTP handlers for the search UI and web interface.
+// It serves landing pages, search results, image detail views, and
+// related image queries with template rendering.
 package web
 
 import (

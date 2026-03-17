@@ -15,6 +15,7 @@ import (
 
 	"iris/config"
 	"iris/internal/assets"
+	"iris/internal/authority"
 	"iris/internal/encoder"
 	"iris/internal/indexing"
 	"iris/internal/metadata"
@@ -63,7 +64,10 @@ func main() {
 	}
 	defer qdrantStore.Close()
 
-	engine := search.NewEngine(encoderRegistry, qdrantStore)
+	// Initialize ranker for hybrid scoring
+	ranker := search.NewRanker(&search.DefaultAuthorityTracker{})
+	tracker := authority.NewMemoryStore(nil)
+	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
 	assetStore, err := assets.NewStoreFromSettings(context.Background(), assets.Settings{
 		Backend: cfg.AssetBackend,
 		S3: assets.S3Config{

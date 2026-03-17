@@ -1,3 +1,6 @@
+// Package metadata provides enrichment functionality for image records.
+// It extracts EXIF data, performs OCR, and generates caption-based tags
+// to improve search relevance through composite enrichers.
 package metadata
 
 import (

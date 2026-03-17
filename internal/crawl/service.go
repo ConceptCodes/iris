@@ -1,3 +1,6 @@
+// Package crawl provides web crawling functionality for discovering and indexing images.
+// It supports multiple source types (URLs, domains, sitemaps, local directories)
+// with robots.txt compliance, rate limiting, and job queue integration.
 package crawl
 
 import (
