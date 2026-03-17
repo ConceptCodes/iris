@@ -1,3 +1,17 @@
+// Package config provides environment-based configuration for the iris application.
+//
+// Configuration is loaded from environment variables with sensible defaults for
+// local development. The package supports configuration for multiple deployment
+// modes (server, worker, indexer) and integrates with various backends (Qdrant,
+// Postgres, S3/MinIO, gRPC encoders).
+//
+// Key configuration areas:
+//   - Encoder endpoints (CLIP, SigLIP2, metadata service)
+//   - Vector database (Qdrant)
+//   - Asset storage (local filesystem or S3-compatible)
+//   - Job queue backend (memory or Postgres)
+//   - Worker/indexer behavior (concurrency, lease duration)
+//   - Admin API security (API keys, feature toggles)
 package config
 
 import (
@@ -136,6 +150,11 @@ type Worker struct {
 	CrawlRPS             int           // Default crawl requests per second for sources without explicit RateLimitRPS
 }
 
+// LoadServer loads server configuration from environment variables.
+//
+// Returns a Server config with HTTP address, admin API settings, crawl parameters,
+// and job backend configuration. Uses loadShared() to populate encoder, Qdrant,
+// and asset storage settings common to all deployment modes.
 func LoadServer() Server {
 	return Server{
 		Shared: loadShared(),
@@ -160,6 +179,11 @@ func LoadServer() Server {
 	}
 }
 
+// LoadIndexer loads indexer configuration from environment variables.
+//
+// Returns an Indexer config with concurrency settings for parallel job processing.
+// Uses loadShared() to populate encoder, Qdrant, and asset storage settings.
+// The indexer mode is designed for CLI-driven batch indexing operations.
 func LoadIndexer() Indexer {
 	return Indexer{
 		Shared: loadShared(),
@@ -170,6 +194,12 @@ func LoadIndexer() Indexer {
 	}
 }
 
+// LoadWorker loads worker configuration from environment variables.
+//
+// Returns a Worker config with job polling settings, lease duration, concurrency,
+// and job backend configuration (memory or Postgres). Uses loadShared() to populate
+// encoder, Qdrant, and asset storage settings. Worker mode supports both indexer
+// and discovery operations for distributed job processing.
 func LoadWorker() Worker {
 	return Worker{
 		Shared:     loadShared(),
