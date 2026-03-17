@@ -1,6 +1,9 @@
 package models
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 type Embedding []float32
 type Encoder string
@@ -16,12 +19,60 @@ func NormalizeEncoder(value Encoder) Encoder {
 }
 
 type ImageRecord struct {
-	ID           string            `json:"id"`
-	URL          string            `json:"url"`
-	ThumbnailURL string            `json:"thumbnail_url,omitempty"`
-	Filename     string            `json:"filename,omitempty"`
-	Tags         []string          `json:"tags,omitempty"`
-	Meta         map[string]string `json:"meta,omitempty"`
+	ID              string            `json:"id"`
+	URL             string            `json:"url"`
+	ThumbnailURL    string            `json:"thumbnail_url,omitempty"`
+	Filename        string            `json:"filename,omitempty"`
+	Tags            []string          `json:"tags,omitempty"`
+	Meta            map[string]string `json:"meta,omitempty"`
+	ImageWidth      int               `json:"image_width,omitempty"`
+	ImageHeight     int               `json:"image_height,omitempty"`
+	FileSize        int64             `json:"file_size,omitempty"`
+	ColorDepth      string            `json:"color_depth,omitempty"`
+	QualityScore    float32           `json:"quality_score,omitempty"`
+	DomainAuthority float32           `json:"domain_authority,omitempty"`
+	IndexedAt       string            `json:"indexed_at,omitempty"`
+	LastCrawled     string            `json:"last_crawled,omitempty"`
+	OGTitle         string            `json:"og_title,omitempty"`
+	OGDescription   string            `json:"og_description,omitempty"`
+}
+
+// QualityRank returns a normalized quality score (0.0-1.0) based on resolution and color depth.
+// Higher resolution and more color channels result in higher quality scores.
+func (r *ImageRecord) QualityRank() float32 {
+	if r == nil {
+		return 0.0
+	}
+
+	maxPixels := 8_294_400.0
+	pixels := float64(r.ImageWidth * r.ImageHeight)
+
+	resolutionScore := float32(0.0)
+	if pixels > 0 {
+		resolutionScore = float32(math.Log(pixels) / math.Log(maxPixels))
+		if resolutionScore > 1.0 {
+			resolutionScore = 1.0
+		}
+	}
+
+	colorDepthScore := float32(0.5)
+	switch r.ColorDepth {
+	case "rgb":
+		colorDepthScore = 0.8
+	case "rgba":
+		colorDepthScore = 1.0
+	}
+
+	qualityScore := resolutionScore*0.6 + colorDepthScore*0.4
+
+	if qualityScore < 0.0 {
+		qualityScore = 0.0
+	}
+	if qualityScore > 1.0 {
+		qualityScore = 1.0
+	}
+
+	return qualityScore
 }
 
 type SearchResult struct {
