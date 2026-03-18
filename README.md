@@ -14,56 +14,56 @@
 ## Architecture
 
 ```text
-┌──────────────────────────────────────────────────────────────────┐
-│                            Client                                │
-└────────────────────┬──────────────────────────────────┬──────────┘
-                     │                                  │
-               Search traffic                   Index/admin traffic
-                     │                                  │
-        ┌────────────▼──────────────────────────────────▼─────────┐
-        │                  Go API Server                           │
-        │                    cmd/server                            │
-        └──────────┬────────────────┬──────────────┬───────────────┘
-                gRPC              gRPC             HTTP
-                   │                 │               │
-        ┌──────────▼────────┐  ┌─────▼──────┐      │
-        │ Python Encoders  │  │   Qdrant   │      │
-        │ CLIP + SigLIP2   │  │  vector DB │      │
-        └────────┬─────────┘  └────────────┘      │
-                 │                                │
-              gRPC                                │
-                 │                                │
-        ┌────────▼──────────────┐                │
-        │ Metadata Service      │                │
-        │ (OCR, captions, tags) │                │
-        └────────────────────────┘               │
-                                                 │
-            ┌────────────────────────────────────▼─────────────────┐
-            │    Shared Ingestion Pipeline                         │
-            │        internal/indexing                             │
-            ├────────────────────────────────────────────────────────┤
-            │ Crawl → Extract → Enrich → Rank → Index → Store     │
-            └─────┬────────────────────────────────────────────┬───┘
-                  │                                            │
-         ┌────────▼────────────────────┐    ┌──────────────────▼──┐
-         │   cmd/indexer (batch)       │    │   cmd/worker        │
-         │                             │    │   (job queue)       │
-         │ - URL/domain crawling       │    │                     │
-         │ - Sitemap discovery         │    │ - Process jobs      │
-         │ - Local directory scan      │    │ - Encode images     │
-         │ - Rate limiting             │    │ - Generate tags     │
-         └────┬─────────────────────────┘    │ - Build vectors     │
-              │                               │ - Create thumbnails │
-              └───────────┬────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                         Client                             │
+└──────────────┬──────────────────────────────┬──────────────┘
+               │                              │
+         Search traffic               Index/admin traffic
+               │                              │
+    ┌──────────▼──────────────────────────────▼──────────┐
+    │              Go API Server                          │
+    │                cmd/server                           │
+    └────┬──────────────┬─────────────┬────────────────┬──┘
+      gRPC           gRPC             │              HTTP
+         │              │             │                │
+    ┌────▼─────────┐ ┌──▼────────┐   │                │
+    │   Encoders   │ │  Qdrant   │   │                │
+    │ CLIP+SigLIP2 │ │ vector DB │   │                │
+    └────┬─────────┘ └───────────┘   │                │
+         │                            │                │
+      gRPC                            │                │
+         │                            │                │
+    ┌────▼──────────────┐             │                │
+    │ Metadata Service  │             │                │
+    │ OCR, captions     │             │                │
+    └───────────────────┘             │                │
+                                      │                │
+          ┌───────────────────────────┴────────────────▼────┐
+          │        Shared Ingestion Pipeline                │
+          │            internal/indexing                    │
+          ├─────────────────────────────────────────────────┤
+          │  Crawl → Extract → Enrich → Rank → Index       │
+          └────┬─────────────────────────────────┬──────────┘
+               │                                 │
+    ┌──────────▼──────────────┐     ┌───────────▼──────────┐
+    │  cmd/indexer (batch)    │     │  cmd/worker          │
+    │                         │     │  (job queue)         │
+    │ • URL/domain crawling   │     │                      │
+    │ • Sitemap discovery     │     │ • Process jobs       │
+    │ • Local directory scan  │     │ • Encode images      │
+    │ • Rate limiting         │     │ • Generate tags      │
+    └──────────┬──────────────┘     │ • Build vectors      │
+               │                    │ • Create thumbnails  │
+               └──────────┬─────────┴──────────────────────┘
                           │
-            ┌─────────────▼──────────────┐
-            │   Storage Layer            │
-            │   (MinIO / S3)             │
-            │                            │
-            │ - Original images          │
-            │ - Generated thumbnails     │
-            │ - Extracted metadata       │
-            └────────────────────────────┘
+              ┌───────────▼───────────┐
+              │  Storage Layer        │
+              │  (MinIO / S3)         │
+              │                       │
+              │ • Original images     │
+              │ • Generated thumbnails│
+              │ • Extracted metadata  │
+              └───────────────────────┘
 ```
 
 ## Quick Start
