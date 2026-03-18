@@ -15,9 +15,9 @@ from transformers import BlipForConditionalGeneration, BlipProcessor
 
 from metadata.v1 import metadata_pb2, metadata_pb2_grpc
 
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
-MAX_IMAGE_PIXELS = 100_000_000
-MAX_GRPC_MESSAGE_BYTES = MAX_IMAGE_BYTES + 1024 * 1024
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", 20 * 1024 * 1024))
+MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", 100_000_000))
+MAX_GRPC_MESSAGE_BYTES = int(os.getenv("MAX_GRPC_MESSAGE_BYTES", MAX_IMAGE_BYTES + 1024 * 1024))
 SERVICE_NAME = "metadata.v1.MetadataService"
 STOPWORDS = {
     "a", "an", "and", "at", "background", "blue", "by", "for", "from", "in",
