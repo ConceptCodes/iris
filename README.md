@@ -23,28 +23,46 @@
         ┌───────▼──────────────────────────────▼───────┐
         │                Go API Server                 │
         │                  cmd/server                  │
-        └──────────────┬───────────────────┬───────────┘
-                       │                   │
-                    gRPC                gRPC
-                       │                   │
-        ┌──────────────▼──────┐  ┌────────▼──────────┐
-        │ Python Encoders    │  │    Qdrant        │
-        │ CLIP + SigLIP2    │  │   vector DB      │
-        └────────────────────┘  └──────────────────┘
-                       │
-                    gRPC
-                       │
-        ┌──────────────▼──────────┐
-        │ Metadata Service       │
-        │ (OCR, captions, tags)  │
-        └────────────────────────┘
-
-        ┌──────────────────────────────────────────────┐
-        │            Shared Ingestion Pipeline         │
-        │              internal/indexing               │
-        └──────────────┬───────────────────────┬───────┘
-                       │                       │
-                  cmd/indexer              cmd/worker
+        └──────────────┬─────────────┬────────┬────────┘
+                    gRPC           gRPC      HTTP
+                       │              │        │
+        ┌──────────────▼────┐  ┌──────▼─────┐ │
+        │ Python Encoders  │  │   Qdrant   │ │
+        │ CLIP + SigLIP2   │  │  vector DB │ │
+        └──────────────────┘  └────────────┘ │
+                       │                    │
+                    gRPC                    │
+                       │                    │
+        ┌──────────────▼──────────┐        │
+        │  Metadata Service      │        │
+        │ (OCR, captions, tags)  │        │
+        └────────────────────────┘        │
+                                          │
+            ┌─────────────────────────────▼──────────────────┐
+            │     Shared Ingestion Pipeline                  │
+            │         internal/indexing                      │
+            ├─────────────────────────────────────────────────┤
+            │ Crawl → Extract → Enrich → Rank → Index → Store│
+            └──┬─────────────────────────────────────────┬───┘
+               │                                         │
+          ┌────▼────────────────────┐   ┌───────────────▼──┐
+          │  cmd/indexer (batch)    │   │  cmd/worker      │
+          │                         │   │  (job queue)     │
+          │ - URL/domain crawling   │   │                  │
+          │ - Sitemap discovery     │   │ - Process jobs   │
+          │ - Local directory scan  │   │ - Encode images  │
+          └────┬────────────────────┘   │ - Generate tags  │
+               │                        │ - Build vectors  │
+               └────────┬───────────────┘
+                        │
+            ┌───────────▼────────────┐
+            │  Storage Layer         │
+            │  (MinIO/S3)            │
+            │                        │
+            │ - Original images      │
+            │ - Generated thumbnails │
+            │ - Extracted metadata   │
+            └────────────────────────┘
 ```
 
 ## Quick Start
@@ -76,6 +94,33 @@ Visit [http://localhost:8080](http://localhost:8080) to use the UI.
 
 Grafana defaults to `admin` / `admin` in local Docker unless you override
 `GRAFANA_ADMIN_USER` or `GRAFANA_ADMIN_PASSWORD`.
+
+## Ingestion Pipeline
+
+The **shared ingestion pipeline** (`internal/indexing`) orchestrates image discovery, processing, and indexing:
+
+### Indexer (`cmd/indexer`)
+Batch-oriented, stateless crawler for initial data collection:
+- **Discovery**: Crawl HTTP URLs, domains, XML sitemaps, or local directories
+- **Extraction**: Download images and extract EXIF metadata
+- **Rate Limiting**: Respect per-domain crawl limits via configurable RPS
+- **Job Creation**: Queue images for worker processing
+
+### Worker (`cmd/worker`)
+Processes crawled images through the full embedding pipeline:
+1. **Image Validation**: Check dimensions, file size, color depth
+2. **Metadata Enrichment**: Extract OCR text, generate captions, derive tags (via metadata service)
+3. **Quality Scoring**: Compute quality rank from resolution and color depth
+4. **Encoding**: Generate vectors for indexed encoders (CLIP, SigLIP2, etc.)
+5. **Vector Storage**: Insert vectors + metadata into Qdrant with named fields per encoder
+6. **Thumbnail Generation**: Create optimized thumbnails and store in S3/MinIO
+7. **Asset Management**: Track original + thumbnail URLs for retrieval
+
+### Storage Layer
+Assets stored in S3-compatible object store (MinIO in Docker):
+- **Original images**: Full resolution for re-encoding if needed
+- **Thumbnails**: Web-optimized versions for UI display
+- **Metadata artifacts**: Extracted OCR and captions
 
 ## Encoder Transport
 
