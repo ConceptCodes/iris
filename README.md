@@ -27,10 +27,17 @@
                        │                   │
                     gRPC                gRPC
                        │                   │
-             ┌─────────▼───────┐   ┌───────▼─────────┐
-             │ Python Encoders │   │    Qdrant       │
-             │ CLIP + SigLIP2  │   │   vector DB     │
-             └─────────────────┘   └─────────────────┘
+        ┌──────────────▼──────┐  ┌────────▼──────────┐
+        │ Python Encoders    │  │    Qdrant        │
+        │ CLIP + SigLIP2    │  │   vector DB      │
+        └────────────────────┘  └──────────────────┘
+                       │
+                    gRPC
+                       │
+        ┌──────────────▼──────────┐
+        │ Metadata Service       │
+        │ (OCR, captions, tags)  │
+        └────────────────────────┘
 
         ┌──────────────────────────────────────────────┐
         │            Shared Ingestion Pipeline         │
@@ -62,6 +69,7 @@ Visit [http://localhost:8080](http://localhost:8080) to use the UI.
 | `qdrant` | 6333 | Vector Database |
 | `clip` | 8001 | CLIP Embedding gRPC Service |
 | `siglip2` | 8002 | SigLIP2 Embedding gRPC Service |
+| `metadata` | 8003 | Metadata Enrichment gRPC Service (OCR, captions, tags) |
 | `postgres` | 5432 | Worker Job Store |
 | `grafana` | 3000 | Observability Dashboard |
 | `minio` | 9000 / 9001 | S3-Compatible Object Store |
@@ -95,9 +103,9 @@ Set `METADATA_ADDR` to enable the sidecar-backed enrichment path. The Docker
 stack wires this to `http://metadata:8003` by default, which is normalized to a
 gRPC target internally.
 
-The encoder protobuf contract currently lives at `proto/clip/v1/clip.proto` and is shared by both sidecars.
+The encoder protobuf contract lives at `proto/clip/v1/clip.proto` and is used by both CLIP and SigLIP2 services. The metadata service has its own contract at `proto/metadata/v1/metadata.proto`.
 
-If you change the protobuf contract, regenerate stubs with:
+If you change the protobuf contracts, regenerate stubs with:
 
 ```bash
 just proto
@@ -105,8 +113,10 @@ just proto
 
 This updates:
 
-- Go stubs in `internal/clip/clipv1`
-- Python stubs in `clip_service/clip/v1`
+- Go stubs in `internal/clip/clipv1` (from `proto/clip/v1/clip.proto`)
+- Python stubs in `clip_service/clip/v1` (from `proto/clip/v1/clip.proto`)
+- Go stubs in `internal/metadata/metadatav1` (from `proto/metadata/v1/metadata.proto`)
+- Python stubs in `metadata_service/metadata/v1` (from `proto/metadata/v1/metadata.proto`)
 
 ## Hybrid Re-Ranking Strategy
 
