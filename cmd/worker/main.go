@@ -3,36 +3,23 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
-	"math/rand"
-	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"iris/config"
-	"iris/internal/assets"
-	"iris/internal/authority"
 	"iris/internal/crawl"
-	"iris/internal/encoder"
-	errpkg "iris/internal/error"
 	"iris/internal/indexing"
 	"iris/internal/jobs"
-	"iris/internal/metadata"
 	"iris/internal/metrics"
-	"iris/internal/search"
-	"iris/internal/ssrf"
-	"iris/internal/store"
+	appruntime "iris/internal/runtime"
 	"iris/internal/tracing"
+	workerpkg "iris/internal/worker"
 	"iris/pkg/models"
 )
 
@@ -48,47 +35,9 @@ const (
 // Transient errors: network timeouts, temporary failures, rate limits (429, 502, 503, 504), context deadlines
 // Permanent errors: not found (404), bad request (400), authentication failures (401, 403), validation errors
 func classifyError(err error) errorType {
-	// Check for HTTP status code errors
-	var httpErr interface{ StatusCode() int }
-	if errors.As(err, &httpErr) {
-		switch httpErr.StatusCode() {
-		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
-			// 400, 401, 403, 404 are permanent errors
-			return errorTypePermanent
-		case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			// 429, 502, 503, 504 are transient errors
-			return errorTypeTransient
-		}
+	if workerpkg.ClassifyError(err) == workerpkg.ErrorTypePermanent {
+		return errorTypePermanent
 	}
-
-	// Check for context errors (timeout, cancellation)
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return errorTypeTransient
-	}
-
-	// Check for network-related errors
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return errorTypeTransient
-	}
-
-	// Check for specific error codes that indicate permanent failures
-	var targetError errpkg.ErrorCode
-	if errors.As(err, &targetError) {
-		switch targetError {
-		case errpkg.ErrUnsupportedContentType,
-			errpkg.ErrImageExceedsLimit,
-			errpkg.ErrNotFound,
-			errpkg.ErrInvalidInput,
-			errpkg.ErrRequiredField,
-			errpkg.ErrFailedToReadFile,
-			errpkg.ErrURLRequired,
-			errpkg.ErrImageRequired,
-			errpkg.ErrAdminAPIDisabled:
-			return errorTypePermanent
-		}
-	}
-
-	// Default to transient for unknown errors to allow retry
 	return errorTypeTransient
 }
 
@@ -96,42 +45,11 @@ func classifyError(err error) errorType {
 // Formula: baseDelay * (2 ^ (attempt - 1)) + random jitter [0, baseDelay * 0.5)
 // Capped at a reasonable maximum (5 minutes).
 func calculateRetryBackoff(attempt int, baseDelay time.Duration) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-
-	// Exponential backoff: baseDelay * (2 ^ (attempt - 1))
-	backoff := baseDelay * time.Duration(1<<(attempt-1))
-
-	// Add jitter: random value from [0, baseDelay * 0.5) to distribute retries
-	jitterWindow := int64(baseDelay / 2)
-	var jitter time.Duration
-	if jitterWindow > 0 {
-		jitter = time.Duration(rand.Int63n(jitterWindow))
-	}
-	backoff += jitter
-
-	// Cap at maximum delay (5 minutes)
-	maxDelay := 5 * time.Minute
-	if backoff > maxDelay {
-		backoff = maxDelay
-	}
-
-	return backoff
+	return workerpkg.CalculateRetryBackoff(attempt, baseDelay)
 }
 
 func sleepWithContext(ctx context.Context, delay time.Duration) error {
-	if delay <= 0 {
-		delay = time.Second
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	return workerpkg.SleepWithContext(ctx, delay)
 }
 
 type crawlerRuntime struct {
@@ -218,9 +136,9 @@ func newJobStore(cfg config.Worker) (jobs.Store, error) {
 }
 
 type indexerPipeline struct {
-	pipeline    *indexing.Pipeline
-	crawlStore  crawl.Store
-	qdrantStore *store.QdrantStore
+	pipeline   *indexing.Pipeline
+	crawlStore crawl.Store
+	runtime    *appruntime.IngestionRuntime
 }
 
 func initializeIndexerPipeline(ctx context.Context, cfg config.Worker) (*indexerPipeline, error) {
@@ -229,60 +147,26 @@ func initializeIndexerPipeline(ctx context.Context, cfg config.Worker) (*indexer
 		return nil, err
 	}
 
-	encoderRegistry, cleanupEncoders, err := encoder.NewRegistryFromConfig(cfg.Shared)
+	runtimeCfg := appruntime.ConfigFromShared(cfg.Shared)
+	runtimeCfg.MaxFetchBytes = cfg.MaxImageBytes
+	runtimeCfg.FetchTimeout = cfg.FetchTimeout
+	runtimeCfg.UserAgent = cfg.UserAgent
+	ingestionRuntime, err := appruntime.NewIngestionRuntime(ctx, cfg.Shared, runtimeCfg)
 	if err != nil {
-		crawlStore.Close()
-		return nil, fmt.Errorf("create encoder registry: %w", err)
-	}
-	qdrantStore, err := store.NewQdrantStoreWithEncoders(cfg.QdrantAddr, cfg.EncoderDims(), 15*time.Second)
-	if err != nil {
-		cleanupEncoders()
 		crawlStore.Close()
 		return nil, err
 	}
-
-	tracker := authority.NewMemoryStore(nil)
-	ranker := search.NewRanker(tracker)
-	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
-	assetStore, err := assets.NewStoreFromSettings(ctx, assets.Settings{
-		Backend: cfg.AssetBackend,
-		S3: assets.S3Config{
-			Bucket:       cfg.AssetBucket,
-			Region:       cfg.AssetRegion,
-			Endpoint:     cfg.AssetEndpoint,
-			AccessKey:    cfg.AssetAccessKey,
-			SecretKey:    cfg.AssetSecretKey,
-			SessionToken: cfg.AssetSessionKey,
-			Prefix:       cfg.AssetPrefix,
-			PublicBase:   cfg.AssetPublicBase,
-			UsePathStyle: cfg.AssetPathStyle,
-		},
-	})
-	if err != nil {
-		qdrantStore.Close()
-		cleanupEncoders()
-		crawlStore.Close()
-		return nil, err
-	}
-	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
-		AssetStore:               assetStore,
-		Enricher:                 metadata.NewComposite(metadata.EXIFEnricher{}, metadata.NewClient(cfg.MetadataAddr, 45*time.Second)),
-		MaxFetchBytes:            cfg.MaxImageBytes,
-		FetchClient:              &http.Client{Timeout: cfg.FetchTimeout},
-		UserAgent:                cfg.UserAgent,
-		SSRFAllowPrivateNetworks: cfg.SSRFAllowPrivateNetworks,
-	})
 
 	return &indexerPipeline{
-		pipeline:    pipeline,
-		crawlStore:  crawlStore,
-		qdrantStore: qdrantStore,
+		pipeline:   ingestionRuntime.Pipeline,
+		crawlStore: crawlStore,
+		runtime:    ingestionRuntime,
 	}, nil
 }
 
 func (ip *indexerPipeline) close() {
-	if ip.qdrantStore != nil {
-		ip.qdrantStore.Close()
+	if ip.runtime != nil {
+		ip.runtime.Close()
 	}
 	if ip.crawlStore != nil {
 		ip.crawlStore.Close()
@@ -593,17 +477,18 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, runtime *crawlerRu
 
 	switch source.Kind {
 	case crawl.SourceKindLocalDir:
-		discovered, err := enqueueLocalDirJobs(ctx, jobStore, source.LocalPath, payload.RunID, source.MaxImagesPerRun)
+		discovered, err := workerpkg.EnqueueLocalDirJobs(ctx, enqueueJobFunc(jobStore), source.LocalPath, payload.RunID, source.MaxImagesPerRun, workerpkg.IsImageExt, metrics.IncCrawlBudgetHit)
 		if err != nil {
 			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 			return err
 		}
+		metrics.IncCrawlJobsDiscovered()
 		if err := crawlStore.SetRunDiscovered(ctx, payload.RunID, discovered); err != nil {
 			return err
 		}
 		return crawlStore.MarkRunCompleted(ctx, payload.RunID)
 	case crawl.SourceKindURLList:
-		discovered, err := enqueueURLListSource(ctx, jobStore, source.SeedURL, payload.RunID, source.MaxImagesPerRun)
+		discovered, err := workerpkg.EnqueueURLListSource(ctx, enqueueJobFunc(jobStore), source.SeedURL, payload.RunID, source.MaxImagesPerRun, cfg.SSRFAllowPrivateNetworks)
 		if err != nil {
 			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 			return err
@@ -613,7 +498,7 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, runtime *crawlerRu
 		}
 		return crawlStore.MarkRunCompleted(ctx, payload.RunID)
 	case crawl.SourceKindDomain:
-		discovered, err := discoverDomainSource(ctx, cfg, runtime, jobStore, source, payload.RunID)
+		discovered, err := workerpkg.DiscoverDomain(ctx, toWorkerRuntime(runtime), enqueueJobFunc(jobStore), source, payload.RunID)
 		if err != nil {
 			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 			return err
@@ -623,7 +508,7 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, runtime *crawlerRu
 		}
 		return crawlStore.MarkRunCompleted(ctx, payload.RunID)
 	case crawl.SourceKindSitemap:
-		discovered, err := discoverSitemapSource(ctx, cfg, runtime, jobStore, source, payload.RunID)
+		discovered, err := workerpkg.DiscoverSitemap(ctx, toWorkerRuntime(runtime), enqueueJobFunc(jobStore), source, payload.RunID)
 		if err != nil {
 			_ = crawlStore.MarkRunFailed(ctx, payload.RunID, err.Error())
 			return err
@@ -639,32 +524,49 @@ func handleCrawlerJob(ctx context.Context, cfg config.Worker, runtime *crawlerRu
 	}
 }
 
+func enqueueJobFunc(jobStore jobs.Store) workerpkg.EnqueueFunc {
+	return func(ctx context.Context, jobType, dedupKey string, payload json.RawMessage) error {
+		_, err := jobStore.Enqueue(ctx, jobs.Job{
+			Type:        jobs.Type(jobType),
+			DedupKey:    dedupKey,
+			PayloadJSON: payload,
+		})
+		return err
+	}
+}
+
+func toWorkerRuntime(r *crawlerRuntime) *workerpkg.CrawlerRuntime {
+	if r == nil {
+		return nil
+	}
+	return &workerpkg.CrawlerRuntime{
+		Fetcher:    r.fetcher,
+		Robots:     r.robots,
+		CacheStore: r.cacheStore,
+	}
+}
+
 func newCrawlerRuntime(cfg config.Worker) (*crawlerRuntime, error) {
 	cacheStore, err := newCacheStore(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	validator := ssrf.NewValidator()
-	safeClient := validator.NewSafeClient(30 * time.Second)
-
-	fetcherOptions := crawl.FetcherOptions{
-		DefaultTTL:      cfg.HTTPCacheTTL,
-		Retries:         cfg.FetchRetries,
-		RetryBackoff:    cfg.FetchRetryBackoff,
-		HostConcurrency: cfg.HostConcurrency,
-		Store:           cacheStore,
-	}
-	robotsOptions := crawl.FetcherOptions{
-		DefaultTTL:      cfg.RobotsCacheTTL,
-		Retries:         cfg.FetchRetries,
-		RetryBackoff:    cfg.FetchRetryBackoff,
-		HostConcurrency: cfg.HostConcurrency,
-		Store:           cacheStore,
+	runtime, err := workerpkg.NewCrawlerRuntime(workerpkg.DiscoverConfig{
+		SSRFAllowPrivateNetworks: cfg.SSRFAllowPrivateNetworks,
+		FetchRetries:             cfg.FetchRetries,
+		FetchRetryBackoff:        cfg.FetchRetryBackoff,
+		HostConcurrency:          cfg.HostConcurrency,
+		HTTPCacheTTL:             cfg.HTTPCacheTTL,
+		RobotsCacheTTL:           cfg.RobotsCacheTTL,
+	}, cacheStore)
+	if err != nil {
+		cacheStore.Close()
+		return nil, err
 	}
 	return &crawlerRuntime{
-		fetcher:    crawl.NewCachedFetcher(safeClient, "iris", fetcherOptions),
-		robots:     crawl.NewRobotsClientWithOptions(safeClient, "iris", robotsOptions),
+		fetcher:    runtime.Fetcher,
+		robots:     runtime.Robots,
 		cacheStore: cacheStore,
 	}, nil
 }
@@ -726,416 +628,6 @@ func newCrawlStore(cfg config.Worker) (crawl.Store, error) {
 	}
 }
 
-func enqueueLocalDirJobs(ctx context.Context, jobStore jobs.Store, dir, runID string, maxImages int) (int, error) {
-	count := 0
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		if maxImages > 0 && count >= maxImages {
-			metrics.IncCrawlBudgetHit("images")
-			return filepath.SkipAll
-		}
-		if !imageExts[strings.ToLower(filepath.Ext(path))] {
-			return nil
-		}
-		payload, err := json.Marshal(jobs.IndexLocalFilePayload{Path: path, RunID: runID})
-		if err != nil {
-			return err
-		}
-		if _, err := jobStore.Enqueue(ctx, jobs.Job{
-			Type:        jobs.TypeIndexLocalFile,
-			DedupKey:    dedupKey("index_local_file", runID, path),
-			PayloadJSON: payload,
-		}); err != nil {
-			return err
-		}
-		count++
-		return nil
-	})
-	metrics.IncCrawlJobsDiscovered()
-	return count, err
-}
-
-func enqueueURLListSource(ctx context.Context, jobStore jobs.Store, seedURL, runID string, maxImages int) (int, error) {
-	validator := ssrf.NewValidator()
-	if err := validator.ValidateURL(ctx, seedURL); err != nil {
-		return 0, fmt.Errorf("SSRF blocked: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, seedURL, nil)
-	if err != nil {
-		return 0, err
-	}
-
-	safeClient := validator.NewSafeClient(30 * time.Second)
-
-	resp, err := safeClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("fetch url list: status %d", resp.StatusCode)
-	}
-
-	limited := io.LimitReader(resp.Body, 10*1024*1024)
-	body, err := io.ReadAll(limited)
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, line := range strings.Split(string(body), "\n") {
-		if maxImages > 0 && count >= maxImages {
-			metrics.IncCrawlBudgetHit("images")
-			break
-		}
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		normalizedURL, err := crawl.NormalizeURL(line)
-		if err != nil {
-			continue
-		}
-		payload, err := json.Marshal(jobs.FetchImagePayload{URL: normalizedURL, RunID: runID})
-		if err != nil {
-			return count, err
-		}
-		if _, err := jobStore.Enqueue(ctx, jobs.Job{
-			Type:        jobs.TypeFetchImage,
-			DedupKey:    dedupKey("fetch_image", runID, normalizedURL),
-			PayloadJSON: payload,
-		}); err != nil {
-			return count, err
-		}
-		count++
-	}
-	metrics.IncCrawlJobsDiscovered()
-	return count, nil
-}
-
-type queueItem struct {
-	url   string
-	depth int
-}
-
-func checkCrawlBudgets(source crawl.Source, processedPageCount, discoveredImageCount int) (bool, bool) {
-	pagesOK := source.MaxPagesPerRun == 0 || processedPageCount < source.MaxPagesPerRun
-	imagesOK := source.MaxImagesPerRun == 0 || discoveredImageCount < source.MaxImagesPerRun
-	return pagesOK, imagesOK
-}
-
-func processSingleImage(ctx context.Context, runtime *crawlerRuntime, jobStore jobs.Store, imageURL, pageURL, title, sourceID, runID string, seenImages map[string]struct{}) error {
-	if _, exists := seenImages[imageURL]; exists {
-		return nil
-	}
-	allowed, err := runtime.robots.Allowed(ctx, imageURL)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		metrics.IncCrawlSkip("robots")
-		return nil
-	}
-	seenImages[imageURL] = struct{}{}
-	return enqueueFetchImage(ctx, jobStore, imageURL, runID, pageURL, title, sourceID)
-}
-
-func enqueueDiscoveredImages(ctx context.Context, runtime *crawlerRuntime, jobStore jobs.Store, imageURLs []string, pageURL, canonicalURL, title, sourceID, runID string, maxImages int, seenImages map[string]struct{}) (int, error) {
-	processed := 0
-	currentPageURL := pageURL
-	if canonicalURL != "" {
-		currentPageURL = canonicalURL
-	}
-
-	for _, imageURL := range imageURLs {
-		if maxImages > 0 && processed >= maxImages {
-			metrics.IncCrawlBudgetHit("images")
-			break
-		}
-		_, wasSeen := seenImages[imageURL]
-		if err := processSingleImage(ctx, runtime, jobStore, imageURL, currentPageURL, title, sourceID, runID, seenImages); err != nil {
-			return processed, err
-		}
-		if wasSeen {
-			continue
-		}
-		processed++
-	}
-
-	return processed, nil
-}
-
-func initializeDomainCrawl(source crawl.Source) (allowedDomains []string, maxDepth int, wait func(context.Context) error, normalizedSeedURL string, err error) {
-	seed, err := url.Parse(source.SeedURL)
-	if err != nil {
-		return nil, 0, nil, "", err
-	}
-
-	allowedDomains = source.AllowedDomains
-	if len(allowedDomains) == 0 {
-		allowedDomains = []string{seed.Hostname()}
-	}
-
-	maxDepth = source.MaxDepth
-	if maxDepth <= 0 {
-		maxDepth = 1
-	}
-
-	wait = sourceThrottle(source.RateLimitRPS)
-
-	normalizedSeedURL, err = crawl.NormalizeURL(source.SeedURL)
-	if err != nil {
-		return nil, 0, nil, "", err
-	}
-
-	return allowedDomains, maxDepth, wait, normalizedSeedURL, nil
-}
-
-func discoverDomainSource(ctx context.Context, cfg config.Worker, runtime *crawlerRuntime, jobStore jobs.Store, source crawl.Source, runID string) (int, error) {
-	allowedDomains, maxDepth, wait, normalizedSeedURL, err := initializeDomainCrawl(source)
-	if err != nil {
-		return 0, err
-	}
-
-	queue := []queueItem{{url: normalizedSeedURL, depth: 0}}
-	visitedPages := map[string]struct{}{}
-	processedPages := map[string]struct{}{}
-	seenImages := map[string]struct{}{}
-	discovered := 0
-
-	for len(queue) > 0 {
-		pagesOK, imagesOK := checkCrawlBudgets(source, len(processedPages), discovered)
-		if !pagesOK {
-			metrics.IncCrawlBudgetHit("pages")
-			break
-		}
-		if !imagesOK {
-			metrics.IncCrawlBudgetHit("images")
-			break
-		}
-
-		item := queue[0]
-		queue = queue[1:]
-		if _, exists := visitedPages[item.url]; exists {
-			continue
-		}
-		visitedPages[item.url] = struct{}{}
-
-		allowed, err := runtime.robots.Allowed(ctx, item.url)
-		if err != nil {
-			return discovered, err
-		}
-		if !allowed {
-			metrics.IncCrawlSkip("robots")
-			continue
-		}
-
-		if err := wait(ctx); err != nil {
-			return discovered, err
-		}
-
-		result, err := runtime.fetcher.Fetch(ctx, item.url)
-		if err != nil {
-			return discovered, err
-		}
-
-		discovery, err := crawl.ExtractHTMLLinks(strings.NewReader(string(result.Body)), result.URL, allowedDomains)
-		if err != nil {
-			return discovered, err
-		}
-
-		pageKey := result.URL
-		if discovery.CanonicalURL != "" {
-			pageKey = discovery.CanonicalURL
-			if discovery.CanonicalURL != result.URL {
-				if _, exists := visitedPages[discovery.CanonicalURL]; !exists {
-					queue = append(queue, queueItem{url: discovery.CanonicalURL, depth: item.depth})
-				}
-			}
-		}
-
-		if _, exists := processedPages[pageKey]; exists {
-			continue
-		}
-		processedPages[pageKey] = struct{}{}
-
-		imagesEnqueued, err := enqueueDiscoveredImages(
-			ctx, runtime, jobStore,
-			discovery.ImageURLs,
-			pageKey,
-			discovery.CanonicalURL,
-			discovery.Title,
-			source.ID, runID,
-			source.MaxImagesPerRun-discovered,
-			seenImages,
-		)
-		if err != nil {
-			return discovered, err
-		}
-		discovered += imagesEnqueued
-
-		if item.depth < maxDepth {
-			for _, pageURL := range discovery.PageURLs {
-				if _, exists := visitedPages[pageURL]; exists {
-					continue
-				}
-				queue = append(queue, queueItem{url: pageURL, depth: item.depth + 1})
-			}
-		}
-	}
-	metrics.IncCrawlJobsDiscovered()
-	return discovered, nil
-}
-
-func fetchAndParseSitemap(ctx context.Context, runtime *crawlerRuntime, seedURL string) ([]string, error) {
-	sitemapResult, err := runtime.fetcher.Fetch(ctx, seedURL)
-	if err != nil {
-		return nil, err
-	}
-	return crawl.ExtractSitemapLocs(strings.NewReader(string(sitemapResult.Body)))
-}
-
-func processSitemapImageURL(ctx context.Context, runtime *crawlerRuntime, jobStore jobs.Store, normalizedLoc string, sourceID, runID string, maxImages int, discovered int, seenImages map[string]struct{}) (int, bool) {
-	if maxImages > 0 && discovered >= maxImages {
-		metrics.IncCrawlBudgetHit("images")
-		return discovered, true
-	}
-	if _, exists := seenImages[normalizedLoc]; exists {
-		return discovered, false
-	}
-	seenImages[normalizedLoc] = struct{}{}
-	if err := enqueueFetchImage(ctx, jobStore, normalizedLoc, runID, "", "", sourceID); err != nil {
-		return discovered, false
-	}
-	return discovered + 1, false
-}
-
-func processSitemapPage(ctx context.Context, runtime *crawlerRuntime, jobStore jobs.Store, source crawl.Source, normalizedLoc string, runID string, maxImages int, discovered int, seenImages map[string]struct{}, processedPages map[string]struct{}) (int, bool, error) {
-	result, err := runtime.fetcher.Fetch(ctx, normalizedLoc)
-	if err != nil {
-		return discovered, false, err
-	}
-	discovery, err := crawl.ExtractHTMLLinks(strings.NewReader(string(result.Body)), result.URL, source.AllowedDomains)
-	if err != nil {
-		return discovered, false, err
-	}
-	pageKey := result.URL
-	if discovery.CanonicalURL != "" {
-		pageKey = discovery.CanonicalURL
-	}
-	if _, exists := processedPages[pageKey]; exists {
-		return discovered, false, nil
-	}
-	processedPages[pageKey] = struct{}{}
-	for _, imageURL := range discovery.ImageURLs {
-		if maxImages > 0 && discovered >= maxImages {
-			metrics.IncCrawlBudgetHit("images")
-			return discovered, true, nil
-		}
-		if _, exists := seenImages[imageURL]; exists {
-			continue
-		}
-		allowed, err := runtime.robots.Allowed(ctx, imageURL)
-		if err != nil {
-			return discovered, false, err
-		}
-		if !allowed {
-			metrics.IncCrawlSkip("robots")
-			continue
-		}
-		seenImages[imageURL] = struct{}{}
-		pageURL := result.URL
-		if discovery.CanonicalURL != "" {
-			pageURL = discovery.CanonicalURL
-		}
-		if err := enqueueFetchImage(ctx, jobStore, imageURL, runID, pageURL, discovery.Title, source.ID); err != nil {
-			return discovered, false, err
-		}
-		discovered++
-	}
-	return discovered, false, nil
-}
-
-func discoverSitemapSource(ctx context.Context, cfg config.Worker, runtime *crawlerRuntime, jobStore jobs.Store, source crawl.Source, runID string) (int, error) {
-	wait := sourceThrottle(source.RateLimitRPS)
-	if err := wait(ctx); err != nil {
-		return 0, err
-	}
-	locs, err := fetchAndParseSitemap(ctx, runtime, source.SeedURL)
-	if err != nil {
-		return 0, err
-	}
-	discovered := 0
-	processedPages := map[string]struct{}{}
-	seenImages := map[string]struct{}{}
-	for _, loc := range locs {
-		if source.MaxPagesPerRun > 0 && len(processedPages) >= source.MaxPagesPerRun {
-			metrics.IncCrawlBudgetHit("pages")
-			break
-		}
-		if source.MaxImagesPerRun > 0 && discovered >= source.MaxImagesPerRun {
-			metrics.IncCrawlBudgetHit("images")
-			break
-		}
-		normalizedLoc, err := crawl.NormalizeURL(loc)
-		if err != nil {
-			continue
-		}
-		allowed, err := runtime.robots.Allowed(ctx, loc)
-		if err != nil {
-			return discovered, err
-		}
-		if !allowed {
-			metrics.IncCrawlSkip("robots")
-			continue
-		}
-
-		if crawl.LooksLikeImageURL(normalizedLoc) {
-			discovered, _ = processSitemapImageURL(ctx, runtime, jobStore, normalizedLoc, source.ID, runID, source.MaxImagesPerRun, discovered, seenImages)
-			continue
-		}
-
-		if err := wait(ctx); err != nil {
-			return discovered, err
-		}
-		newDiscovered, budgetHit, err := processSitemapPage(ctx, runtime, jobStore, source, normalizedLoc, runID, source.MaxImagesPerRun, discovered, seenImages, processedPages)
-		if err != nil {
-			return discovered, err
-		}
-		if budgetHit {
-			break
-		}
-		discovered = newDiscovered
-	}
-	metrics.IncCrawlJobsDiscovered()
-	return discovered, nil
-}
-
-func enqueueFetchImage(ctx context.Context, jobStore jobs.Store, imageURL, runID string, pageURL, title, sourceID string) error {
-	normalizedURL, err := crawl.NormalizeURL(imageURL)
-	if err != nil {
-		return err
-	}
-	payload, err := json.Marshal(jobs.FetchImagePayload{
-		URL:           normalizedURL,
-		RunID:         runID,
-		PageURL:       pageURL,
-		Title:         title,
-		CrawlSourceID: sourceID,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = jobStore.Enqueue(ctx, jobs.Job{
-		Type:        jobs.TypeFetchImage,
-		DedupKey:    dedupKey("fetch_image", runID, normalizedURL),
-		PayloadJSON: payload,
-	})
-	return err
-}
-
 func incrementRunIndexedForJob(ctx context.Context, crawlStore crawl.Store, job jobs.Job) error {
 	runID, err := extractRunID(job)
 	if err != nil || runID == "" {
@@ -1193,42 +685,11 @@ func dedupKey(jobType, runID, target string) string {
 }
 
 func schedulerDecisionForSource(source crawl.Source) string {
-	switch {
-	case source.ConsecutiveFailures > 0:
-		return "failure_backoff"
-	case source.LastIndexedCount > 0:
-		return "maintain"
-	case source.LastDiscoveredCount == 0 && !source.LastRunAt.IsZero():
-		return "low_yield_backoff"
-	case source.LastDuplicateCount > 0 && source.LastIndexedCount == 0:
-		return "duplicate_backoff"
-	default:
-		return "initial"
-	}
-}
-
-func sourceThrottle(rps int) func(context.Context) error {
-	if rps <= 0 {
-		return func(context.Context) error { return nil }
-	}
-	interval := time.Second / time.Duration(rps)
-	var last time.Time
-	return func(ctx context.Context) error {
-		if last.IsZero() {
-			last = time.Now()
-			return nil
-		}
-		wait := time.Until(last.Add(interval))
-		if wait > 0 {
-			timer := time.NewTimer(wait)
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
-		last = time.Now()
-		return nil
-	}
+	return workerpkg.SchedulerDecision(
+		source.ConsecutiveFailures,
+		source.LastIndexedCount,
+		source.LastDiscoveredCount,
+		source.LastDuplicateCount,
+		!source.LastRunAt.IsZero(),
+	)
 }

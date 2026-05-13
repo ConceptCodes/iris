@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"iris/internal/crawl"
+	"iris/internal/jobs"
 	"iris/internal/metrics"
 	"iris/internal/ssrf"
 )
@@ -34,7 +35,7 @@ type DiscoverConfig struct {
 }
 
 func NewCrawlerRuntime(cfg DiscoverConfig, cacheStore crawl.CacheStore) (*CrawlerRuntime, error) {
-	validator := ssrf.NewValidator()
+	validator := ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(cfg.SSRFAllowPrivateNetworks))
 	safeClient := validator.NewSafeClient(30 * time.Second)
 	fetcherOptions := crawl.FetcherOptions{
 		DefaultTTL:      cfg.HTTPCacheTTL,
@@ -96,11 +97,11 @@ type queueItem struct {
 }
 
 type DiscoverDomainConfig struct {
-	AllowedDomains []string
-	MaxDepth       int
-	MaxPagesPerRun int
+	AllowedDomains  []string
+	MaxDepth        int
+	MaxPagesPerRun  int
 	MaxImagesPerRun int
-	RateLimitRPS   int
+	RateLimitRPS    int
 }
 
 func InitializeDomainCrawl(source crawl.Source) (DiscoverDomainConfig, func(context.Context) error, string, error) {
@@ -263,8 +264,8 @@ func DiscoverSitemap(ctx context.Context, runtime *CrawlerRuntime, enqueueFn Enq
 	return discovered, nil
 }
 
-func EnqueueURLListSource(ctx context.Context, enqueueFn EnqueueFunc, seedURL, runID string, maxImages int) (int, error) {
-	validator := ssrf.NewValidator()
+func EnqueueURLListSource(ctx context.Context, enqueueFn EnqueueFunc, seedURL, runID string, maxImages int, allowPrivateNetworks bool) (int, error) {
+	validator := ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(allowPrivateNetworks))
 	if err := validator.ValidateURL(ctx, seedURL); err != nil {
 		return 0, fmt.Errorf("SSRF blocked: %w", err)
 	}
@@ -300,7 +301,9 @@ func EnqueueURLListSource(ctx context.Context, enqueueFn EnqueueFunc, seedURL, r
 		if err != nil {
 			continue
 		}
-		_ = normalizedURL
+		if err := enqueueFetchImage(ctx, enqueueFn, normalizedURL, runID, "", "", ""); err != nil {
+			return count, fmt.Errorf("enqueue url list item: %w", err)
+		}
 		count++
 	}
 	metrics.IncCrawlJobsDiscovered()
@@ -353,8 +356,19 @@ func enqueueFetchImage(ctx context.Context, enqueueFn EnqueueFunc, imageURL, run
 	if err != nil {
 		return err
 	}
-	_ = normalizedURL
-	return nil
+	payload := jobs.FetchImagePayload{
+		URL:           normalizedURL,
+		RunID:         runID,
+		PageURL:       pageURL,
+		Title:         title,
+		CrawlSourceID: sourceID,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal fetch_image payload: %w", err)
+	}
+	dedupKey := DedupKey(string(jobs.TypeFetchImage), runID, normalizedURL)
+	return enqueueFn(ctx, string(jobs.TypeFetchImage), dedupKey, raw)
 }
 
 func processSitemapImageURL(ctx context.Context, runtime *CrawlerRuntime, enqueueFn EnqueueFunc, normalizedLoc, sourceID, runID string, maxImages, discovered int, seenImages map[string]struct{}) (int, bool) {

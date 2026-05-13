@@ -14,7 +14,21 @@ import (
 	"time"
 
 	errpkg "iris/internal/error"
+	"iris/internal/jobs"
 )
+
+// permanentErrCodes lists the errpkg codes that indicate a job should not be retried.
+var permanentErrCodes = []errpkg.ErrorCode{
+	errpkg.ErrUnsupportedContentType,
+	errpkg.ErrImageExceedsLimit,
+	errpkg.ErrNotFound,
+	errpkg.ErrInvalidInput,
+	errpkg.ErrRequiredField,
+	errpkg.ErrFailedToReadFile,
+	errpkg.ErrURLRequired,
+	errpkg.ErrImageRequired,
+	errpkg.ErrAdminAPIDisabled,
+}
 
 type ErrorType int
 
@@ -41,17 +55,21 @@ func ClassifyError(err error) ErrorType {
 	}
 	var targetError errpkg.ErrorCode
 	if errors.As(err, &targetError) {
-		switch targetError {
-		case errpkg.ErrUnsupportedContentType,
-			errpkg.ErrImageExceedsLimit,
-			errpkg.ErrNotFound,
-			errpkg.ErrInvalidInput,
-			errpkg.ErrRequiredField,
-			errpkg.ErrFailedToReadFile,
-			errpkg.ErrURLRequired,
-			errpkg.ErrImageRequired,
-			errpkg.ErrAdminAPIDisabled:
-			return ErrorTypePermanent
+		for _, code := range permanentErrCodes {
+			if targetError == code {
+				return ErrorTypePermanent
+			}
+		}
+	}
+	// Also classify by message substring for string-backed errors whose text matches a known
+	// permanent errpkg code. This handles callers that construct errors.New() with the same
+	// text as an errpkg.ErrorCode rather than returning the typed code directly.
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		for _, code := range permanentErrCodes {
+			if strings.Contains(msg, strings.ToLower(code.Error())) {
+				return ErrorTypePermanent
+			}
 		}
 	}
 	return ErrorTypeTransient
@@ -104,7 +122,11 @@ func EnqueueLocalDirJobs(ctx context.Context, enqueueFn func(ctx context.Context
 		if !isImageExt(strings.ToLower(filepath.Ext(path))) {
 			return nil
 		}
-		if err := enqueueFn(ctx, "index_local_file", DedupKey("index_local_file", runID, path), nil); err != nil {
+		payload, err := json.Marshal(jobs.IndexLocalFilePayload{Path: path, RunID: runID})
+		if err != nil {
+			return err
+		}
+		if err := enqueueFn(ctx, string(jobs.TypeIndexLocalFile), DedupKey(string(jobs.TypeIndexLocalFile), runID, path), payload); err != nil {
 			return err
 		}
 		count++
@@ -183,13 +205,13 @@ func ProcessSchedules(ctx context.Context, service ScheduleService, now time.Tim
 }
 
 type ScheduleSource struct {
-	ID              string
-	ScheduleEvery   time.Duration
+	ID                  string
+	ScheduleEvery       time.Duration
 	ConsecutiveFailures int
-	LastIndexedCount     int
-	LastDiscoveredCount  int
-	LastDuplicateCount   int
-	LastRunAt            time.Time
+	LastIndexedCount    int
+	LastDiscoveredCount int
+	LastDuplicateCount  int
+	LastRunAt           time.Time
 }
 
 type ScheduleService interface {
