@@ -4,30 +4,20 @@
 package indexing
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"image"
-	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"iris/internal/assets"
 	"iris/internal/constants"
-	errpkg "iris/internal/error"
 	"iris/internal/metadata"
 	"iris/internal/metrics"
-	"iris/internal/quality"
-	"iris/internal/ssrf"
+	"iris/internal/indexing/stages"
 	"iris/pkg/models"
 
-	"github.com/disintegration/imaging"
 	"github.com/google/uuid"
 )
 
@@ -116,7 +106,7 @@ func (p *Pipeline) IndexFromURLResult(ctx context.Context, req models.IndexReque
 	if req.URL == "" {
 		return Result{}, fmt.Errorf("url is required")
 	}
-	imageBytes, mimeType, err := fetchImageBytes(ctx, req.URL, p.options.FetchClient, p.options.MaxFetchBytes, p.options.UserAgent, p.options.SSRFAllowPrivateNetworks)
+	fetchResult, err := stages.FetchImageBytes(ctx, req.URL, p.fetchConfig())
 	if err != nil {
 		return Result{}, err
 	}
@@ -131,10 +121,10 @@ func (p *Pipeline) IndexFromURLResult(ctx context.Context, req models.IndexReque
 		record.Meta = map[string]string{}
 	}
 	record.Meta[constants.MetaKeyOriginURL] = req.URL
-	if mimeType != "" {
-		record.Meta[constants.MetaKeyMIMEType] = mimeType
+	if fetchResult.MIMEType != "" {
+		record.Meta[constants.MetaKeyMIMEType] = fetchResult.MIMEType
 	}
-	return p.indexBytes(ctx, imageBytes, record, false)
+	return p.indexBytes(ctx, fetchResult.Bytes, record, false)
 }
 
 func (p *Pipeline) IndexUploadedBytes(ctx context.Context, imageBytes []byte, filename string, tags []string, meta map[string]string) (string, error) {
@@ -192,7 +182,7 @@ func (p *Pipeline) ReindexFromURLResult(ctx context.Context, imageURL string, re
 	if imageURL == "" {
 		return Result{}, fmt.Errorf("url is required")
 	}
-	imageBytes, mimeType, err := fetchImageBytes(ctx, imageURL, p.options.FetchClient, p.options.MaxFetchBytes, p.options.UserAgent, p.options.SSRFAllowPrivateNetworks)
+	fetchResult, err := stages.FetchImageBytes(ctx, imageURL, p.fetchConfig())
 	if err != nil {
 		return Result{}, err
 	}
@@ -200,31 +190,17 @@ func (p *Pipeline) ReindexFromURLResult(ctx context.Context, imageURL string, re
 		record.Meta = map[string]string{}
 	}
 	record.Meta[constants.MetaKeyOriginURL] = imageURL
-	if mimeType != "" {
-		record.Meta[constants.MetaKeyMIMEType] = mimeType
+	if fetchResult.MIMEType != "" {
+		record.Meta[constants.MetaKeyMIMEType] = fetchResult.MIMEType
 	}
-	return p.indexBytes(ctx, imageBytes, record, true)
+	return p.indexBytes(ctx, fetchResult.Bytes, record, true)
 }
 
 func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord, force bool) (Result, error) {
-	if record.Meta == nil {
-		record.Meta = map[string]string{}
-	}
-	if _, ok := record.Meta[constants.MetaKeyContentSHA256]; !ok {
-		record.Meta[constants.MetaKeyContentSHA256] = hashBytes(imageBytes)
-	}
-	if record.Meta[constants.MetaKeySourceURL] == "" {
-		if original, ok := record.Meta[constants.MetaKeyOriginURL]; ok && original != "" {
-			record.Meta[constants.MetaKeySourceURL] = original
-		} else if record.URL != "" {
-			record.Meta[constants.MetaKeySourceURL] = record.URL
-		}
-	}
-	// Extract source_domain from source_url if not already set
-	if record.Meta[constants.MetaKeySourceDomain] == "" && record.Meta[constants.MetaKeySourceURL] != "" {
-		if u, err := url.Parse(record.Meta[constants.MetaKeySourceURL]); err == nil {
-			record.Meta[constants.MetaKeySourceDomain] = u.Hostname()
-		}
+	var err error
+	record, err = stages.PrepareRecord(ctx, imageBytes, record, force, p.options.Enricher)
+	if err != nil {
+		return Result{}, err
 	}
 	if !force {
 		existing, ok, err := p.engine.FindExistingID(ctx, record.Meta, record.Meta[constants.MetaKeySourceURL])
@@ -236,51 +212,18 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 			return Result{ID: existing, Status: ResultStatusDuplicate}, nil
 		}
 	}
-	if p.options.Enricher != nil {
-		enrichment, err := p.options.Enricher.Enrich(ctx, imageBytes, record)
-		if err != nil {
-			return Result{}, fmt.Errorf("enrich metadata: %w", err)
-		}
-		record.Tags = metadata.MergeTags(record.Tags, enrichment.Tags)
-		if record.Meta == nil {
-			record.Meta = map[string]string{}
-		}
-		for key, value := range enrichment.Meta {
-			if strings.TrimSpace(value) == "" {
-				continue
-			}
-			record.Meta[key] = value
-		}
+	record, err = stages.EnrichRecord(ctx, imageBytes, record, p.options.Enricher)
+	if err != nil {
+		return Result{}, err
 	}
-	// Populate quality signals
-	analyzer := quality.NewDefaultAnalyzer()
-	signals, analyzeErr := analyzer.Analyze(ctx, imageBytes)
-	if analyzeErr == nil && signals.Width > 0 {
-		record.ImageWidth = signals.Width
-		record.ImageHeight = signals.Height
-		record.ColorDepth = signals.ColorDepth
-		record.QualityScore = signals.EntropyScore
-	}
-	// Always set file size
-	record.FileSize = int64(len(imageBytes))
-	// Set indexed timestamp
-	record.IndexedAt = time.Now().UTC().Format(time.RFC3339)
-	if p.options.AssetStore != nil && p.options.ThumbnailWidth > 0 {
-		thumbBytes, err := p.generateThumbnail(imageBytes)
-		if err != nil {
-			// Non-fatal: log and continue without a thumbnail
-			fmt.Fprintf(os.Stderr, "failed to generate thumbnail for %s: %v\n", record.ID, err)
-		} else {
-			thumbURL, err := p.options.AssetStore.Save(ctx, record.ID+"_thumb", record.Filename, thumbBytes)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "failed to save thumbnail for %s: %v\n", record.ID, err)
-			} else {
-				record.ThumbnailURL = thumbURL
-			}
-		}
+	record = stages.AnalyzeQuality(ctx, imageBytes, record)
+	thumbURL, thumbErr := stages.SaveThumbnail(ctx, p.options.AssetStore, record.ID, record.Filename, imageBytes, p.recordConfig())
+	if thumbErr != nil {
+		fmt.Fprintf(os.Stderr, "failed to save thumbnail for %s: %v\n", record.ID, thumbErr)
+	} else if thumbURL != "" {
+		record.ThumbnailURL = thumbURL
 	}
 	var id string
-	var err error
 	if force {
 		id, err = p.engine.ReindexFromBytes(ctx, imageBytes, record)
 		if err != nil {
@@ -299,21 +242,26 @@ func (p *Pipeline) indexBytes(ctx context.Context, imageBytes []byte, record mod
 }
 
 func (p *Pipeline) generateThumbnail(data []byte) ([]byte, error) {
-	img, err := imaging.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("decode image: %w", err)
-	}
-
-	thumb := imaging.Resize(img, p.options.ThumbnailWidth, p.options.ThumbnailHeight, imaging.Lanczos)
-	return p.encodeThumbnail(thumb)
+	return stages.GenerateThumbnail(data, p.options.ThumbnailWidth, p.options.ThumbnailHeight, p.options.ThumbnailQuality)
 }
 
-func (p *Pipeline) encodeThumbnail(img image.Image) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := imaging.Encode(&buf, img, imaging.JPEG, imaging.JPEGQuality(p.options.ThumbnailQuality)); err != nil {
-		return nil, fmt.Errorf("encode thumbnail: %w", err)
+func (p *Pipeline) fetchConfig() stages.FetchConfig {
+	return stages.FetchConfig{
+		Client:                   p.options.FetchClient,
+		MaxBytes:                 p.options.MaxFetchBytes,
+		UserAgent:                p.options.UserAgent,
+		SSRFAllowPrivateNetworks: p.options.SSRFAllowPrivateNetworks,
 	}
-	return buf.Bytes(), nil
+}
+
+func (p *Pipeline) recordConfig() stages.RecordConfig {
+	return stages.RecordConfig{
+		ThumbnailWidth:   p.options.ThumbnailWidth,
+		ThumbnailHeight:  p.options.ThumbnailHeight,
+		ThumbnailQuality: p.options.ThumbnailQuality,
+		AssetStore:       p.options.AssetStore,
+		Enricher:         p.options.Enricher,
+	}
 }
 
 func dedupeReason(meta map[string]string) string {
@@ -330,62 +278,20 @@ func dedupeReason(meta map[string]string) string {
 }
 
 func fetchImageBytes(ctx context.Context, rawURL string, client *http.Client, maxBytes int, userAgent string, ssrfAllowPrivateNetworks bool) ([]byte, string, error) {
-	if client == nil {
-		client = &http.Client{Timeout: constants.HTTPTimeout30s}
-	}
-	if maxBytes <= 0 {
-		maxBytes = constants.MaxImageSize
-	}
-	if strings.TrimSpace(userAgent) == "" {
-		userAgent = constants.DefaultCrawlerUserAgent
-	}
-
-	validator := ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(ssrfAllowPrivateNetworks))
-	if err := validator.ValidateURL(ctx, rawURL); err != nil {
-		return nil, "", fmt.Errorf("SSRF blocked: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	result, err := stages.FetchImageBytes(ctx, rawURL, stages.FetchConfig{
+		Client:                   client,
+		MaxBytes:                 maxBytes,
+		UserAgent:                userAgent,
+		SSRFAllowPrivateNetworks: ssrfAllowPrivateNetworks,
+	})
 	if err != nil {
-		return nil, "", fmt.Errorf("create request: %w", err)
+		return nil, "", err
 	}
-	req.Header.Set(constants.HeaderUserAgent, userAgent)
-
-	safeClient := validator.NewSafeClient(constants.HTTPTimeout30s)
-
-	resp, err := safeClient.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("fetch image url: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("fetch image url: status %d", resp.StatusCode)
-	}
-	contentType := strings.ToLower(resp.Header.Get(constants.HeaderContentType))
-	if contentType != "" && !strings.HasPrefix(contentType, constants.MIMETypeImagePrefix) {
-		return nil, "", errpkg.ErrUnsupportedContentType.ErrorWith(fmt.Errorf("content type: %s", contentType))
-	}
-	limited := io.LimitReader(resp.Body, int64(maxBytes+1))
-	buf, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, "", fmt.Errorf("read image bytes: %w", err)
-	}
-	if len(buf) > maxBytes {
-		return nil, "", errpkg.ErrImageExceedsLimit.ErrorWith(fmt.Errorf("size: %d bytes exceeds limit: %d bytes", len(buf), maxBytes))
-	}
-	if contentType == "" {
-		detected := http.DetectContentType(buf)
-		if !strings.HasPrefix(detected, constants.MIMETypeImagePrefix) {
-			return nil, "", errpkg.ErrUnsupportedContentType.ErrorWith(fmt.Errorf("detected content type: %s", detected))
-		}
-		contentType = detected
-	}
-	return buf, contentType, nil
+	return result.Bytes, result.MIMEType, nil
 }
 
 func hashBytes(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+	return stages.HashBytes(data)
 }
 
 func cloneMeta(meta map[string]string) map[string]string {

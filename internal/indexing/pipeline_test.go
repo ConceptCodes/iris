@@ -275,7 +275,7 @@ func TestFetchImageBytesRejectsOversizedResponses(t *testing.T) {
 	defer server.Close()
 
 	_, _, err := fetchImageBytes(context.Background(), server.URL, nil, 5, "test-agent", true)
-	if err == nil || !strings.Contains(err.Error(), "image exceeds 5 bytes limit") {
+	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
 		t.Fatalf("expected image size limit error, got %v", err)
 	}
 }
