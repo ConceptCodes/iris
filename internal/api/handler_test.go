@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,6 +25,34 @@ type stubEngine struct {
 	lastFilters map[string]string
 	lastLimit   uint32
 	lastOffset  uint32
+}
+
+func TestHandlerIndexFromUploadRejectsUnsupportedMIME(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreatePart(map[string][]string{
+		"Content-Disposition": {`form-data; name="image"; filename="index.html"`},
+		"Content-Type":        {"text/html"},
+	})
+	if err != nil {
+		t.Fatalf("create multipart part: %v", err)
+	}
+	if _, err := part.Write([]byte("<html></html>")); err != nil {
+		t.Fatalf("write multipart body: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	h := NewHandlerWithServices(&stubEngine{}, &stubIndexer{result: indexing.Result{ID: "unexpected"}}, nil, nil, metrics.NewCounters())
+	req := httptest.NewRequest(http.MethodPost, "/", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	res := httptest.NewRecorder()
+
+	h.IndexFromUpload(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", res.Code)
+	}
 }
 
 func (s *stubEngine) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
@@ -314,10 +343,10 @@ func TestHandlerHandleReindexListsWithFilters(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", res.Code)
 	}
-	if engine.lastFilters[constants.PayloadFieldMetaPrefix+constants.MetaKeySourceID] != "source-123" {
+	if engine.lastFilters[constants.MetaKeySourceID] != "source-123" {
 		t.Fatalf("expected source_id filter to be forwarded, got %v", engine.lastFilters)
 	}
-	if engine.lastFilters[constants.PayloadFieldMetaPrefix+constants.MetaKeyRunID] != "run-456" {
+	if engine.lastFilters[constants.MetaKeyRunID] != "run-456" {
 		t.Fatalf("expected run_id filter to be forwarded, got %v", engine.lastFilters)
 	}
 	if engine.lastLimit != 20 || engine.lastOffset != 10 {

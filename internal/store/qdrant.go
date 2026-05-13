@@ -331,9 +331,7 @@ func (s *QdrantStore) recordToPayload(record models.ImageRecord) map[string]*pb.
 	if record.ColorDepth != "" {
 		payload[constants.PayloadFieldColorDepth] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: record.ColorDepth}}
 	}
-	if record.QualityScore > 0 {
-		payload[constants.PayloadFieldQualityScore] = &pb.Value{Kind: &pb.Value_DoubleValue{DoubleValue: float64(record.QualityScore)}}
-	}
+	payload[constants.PayloadFieldQualityScore] = &pb.Value{Kind: &pb.Value_DoubleValue{DoubleValue: float64(record.QualityScore)}}
 	if record.IndexedAt != "" {
 		payload[constants.PayloadFieldIndexedAt] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: record.IndexedAt}}
 	}
@@ -429,7 +427,7 @@ func buildFilterConditions(filters map[string]string) []*pb.Condition {
 		conditions = append(conditions, &pb.Condition{
 			ConditionOneOf: &pb.Condition_Field{
 				Field: &pb.FieldCondition{
-					Key: k,
+					Key: normalizeFilterKey(k),
 					Match: &pb.Match{
 						MatchValue: &pb.Match_Keyword{Keyword: v},
 					},
@@ -440,10 +438,33 @@ func buildFilterConditions(filters map[string]string) []*pb.Condition {
 	return conditions
 }
 
+func normalizeFilterKey(key string) string {
+	if strings.HasPrefix(key, constants.PayloadFieldMetaPrefix) {
+		return key
+	}
+	switch key {
+	case constants.PayloadFieldID,
+		constants.PayloadFieldURL,
+		constants.PayloadFieldFilename,
+		constants.PayloadFieldTags,
+		constants.PayloadFieldThumbnailURL,
+		constants.PayloadFieldImageWidth,
+		constants.PayloadFieldImageHeight,
+		constants.PayloadFieldFileSize,
+		constants.PayloadFieldColorDepth,
+		constants.PayloadFieldQualityScore,
+		constants.PayloadFieldIndexedAt:
+		return key
+	default:
+		return constants.PayloadFieldMetaPrefix + key
+	}
+}
+
 func (s *QdrantStore) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
 	if limit == 0 {
 		limit = constants.DefaultLimit100
 	}
+	scrollLimit := limit + offset
 	var filter *pb.Filter
 	if len(filters) > 0 {
 		conditions := buildFilterConditions(filters)
@@ -452,14 +473,19 @@ func (s *QdrantStore) ListImages(ctx context.Context, filters map[string]string,
 	resp, err := s.points.Scroll(ctx, &pb.ScrollPoints{
 		CollectionName: constants.CollectionNameImages,
 		Filter:         filter,
-		Limit:          &limit,
+		Limit:          &scrollLimit,
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("scroll: %w", err)
 	}
-	records := make([]models.ImageRecord, 0, len(resp.GetResult()))
-	for _, point := range resp.GetResult() {
+	points := resp.GetResult()
+	if offset > uint32(len(points)) {
+		return nil, nil
+	}
+	points = points[offset:]
+	records := make([]models.ImageRecord, 0, len(points))
+	for _, point := range points {
 		if payload := point.GetPayload(); payload != nil {
 			record := s.payloadToRecord(payload)
 			records = append(records, record)

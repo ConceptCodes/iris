@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -22,17 +23,48 @@ import (
 )
 
 type Handler struct {
-	engine       search.Engine
-	indexer      *indexing.Pipeline
-	crawlService *crawl.Service
+	engine       SearchService
+	indexer      IngestionService
+	crawlService CrawlAdminService
 	jobStore     jobs.Store
 	metrics      *metrics.Counters
+}
+
+type SearchService interface {
+	SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error)
+	SearchByImageBytes(ctx context.Context, imageBytes []byte, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error)
+	SearchByImageURL(ctx context.Context, url string, topK int, filters map[string]string, enc models.Encoder) ([]models.SearchResult, error)
+	ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error)
+}
+
+type IngestionService interface {
+	IndexFromURLResult(ctx context.Context, req models.IndexRequest) (indexing.Result, error)
+	IndexUploadedBytesResult(ctx context.Context, imageBytes []byte, filename string, tags []string, meta map[string]string) (indexing.Result, error)
+}
+
+type CrawlAdminService interface {
+	CreateSource(ctx context.Context, input crawl.CreateSourceInput) (crawl.Source, error)
+	TriggerRun(ctx context.Context, sourceID, trigger string) (crawl.Run, error)
+	ListRuns(ctx context.Context, limit int) ([]crawl.Run, error)
+	GetRun(ctx context.Context, id string) (crawl.Run, error)
 }
 
 const maxJSONBodyBytes = 1 << 20
 const defaultRunsLimit = 100
 
 func NewHandler(engine search.Engine, indexer *indexing.Pipeline, crawlService *crawl.Service, jobStore jobs.Store, metrics *metrics.Counters) *Handler {
+	var ingestion IngestionService
+	if indexer != nil {
+		ingestion = indexer
+	}
+	var crawlAdmin CrawlAdminService
+	if crawlService != nil {
+		crawlAdmin = crawlService
+	}
+	return &Handler{engine: engine, indexer: ingestion, crawlService: crawlAdmin, jobStore: jobStore, metrics: metrics}
+}
+
+func NewHandlerWithServices(engine SearchService, indexer IngestionService, crawlService CrawlAdminService, jobStore jobs.Store, metrics *metrics.Counters) *Handler {
 	return &Handler{engine: engine, indexer: indexer, crawlService: crawlService, jobStore: jobStore, metrics: metrics}
 }
 
@@ -367,10 +399,10 @@ func (h *Handler) HandleReindex(w http.ResponseWriter, r *http.Request) {
 
 	filters := make(map[string]string)
 	if req.SourceID != "" {
-		filters[constants.PayloadFieldMetaPrefix+constants.MetaKeySourceID] = req.SourceID
+		filters[constants.MetaKeySourceID] = req.SourceID
 	}
 	if req.RunID != "" {
-		filters[constants.PayloadFieldMetaPrefix+constants.MetaKeyRunID] = req.RunID
+		filters[constants.MetaKeyRunID] = req.RunID
 	}
 
 	limit := uint32(constants.DefaultLimit100)

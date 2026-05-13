@@ -192,10 +192,12 @@ type mockPointsClient struct {
 	scrollResp *pb.ScrollResponse
 	scrollErr  error
 
-	lastTopK        uint64
-	lastFilter      *pb.Filter
-	lastVectorName  string
-	lastNamedUpsert bool
+	lastTopK         uint64
+	lastFilter       *pb.Filter
+	lastVectorName   string
+	lastNamedUpsert  bool
+	lastScrollLimit  uint32
+	lastScrollFilter *pb.Filter
 }
 
 func (m *mockPointsClient) Upsert(ctx context.Context, in *pb.UpsertPoints, opts ...grpc.CallOption) (*pb.PointsOperationResponse, error) {
@@ -220,6 +222,10 @@ func (m *mockPointsClient) Get(ctx context.Context, in *pb.GetPoints, opts ...gr
 }
 
 func (m *mockPointsClient) Scroll(ctx context.Context, in *pb.ScrollPoints, opts ...grpc.CallOption) (*pb.ScrollResponse, error) {
+	if in.Limit != nil {
+		m.lastScrollLimit = *in.Limit
+	}
+	m.lastScrollFilter = in.Filter
 	return m.scrollResp, m.scrollErr
 }
 
@@ -257,7 +263,7 @@ func TestQdrantStore_DataOperations(t *testing.T) {
 			t.Fatalf("filter not mapped correctly")
 		}
 		cond := mc.lastFilter.Must[0].GetField()
-		if cond.Key != "k" || cond.Match.GetKeyword() != "v" {
+		if cond.Key != constants.PayloadFieldMetaPrefix+"k" || cond.Match.GetKeyword() != "v" {
 			t.Errorf("filter mismatch")
 		}
 		if mc.lastVectorName != string(models.EncoderCLIP) {
@@ -338,6 +344,34 @@ func TestQdrantStore_DataOperations(t *testing.T) {
 		id, ok, err := s.FindIDByMeta(context.Background(), "meta_content_sha256", "hash")
 		if err != nil || !ok || id != "point-id" {
 			t.Fatalf("expected id from scroll, got %q ok=%v err=%v", id, ok, err)
+		}
+	})
+
+	t.Run("ListImages honors numeric offset and translates metadata filters", func(t *testing.T) {
+		mc := &mockPointsClient{
+			scrollResp: &pb.ScrollResponse{Result: []*pb.RetrievedPoint{
+				{Payload: map[string]*pb.Value{"id": {Kind: &pb.Value_StringValue{StringValue: "skip"}}}},
+				{Payload: map[string]*pb.Value{"id": {Kind: &pb.Value_StringValue{StringValue: "keep-1"}}}},
+				{Payload: map[string]*pb.Value{"id": {Kind: &pb.Value_StringValue{StringValue: "keep-2"}}}},
+			}},
+		}
+		s := &QdrantStore{points: mc}
+		records, err := s.ListImages(context.Background(), map[string]string{constants.MetaKeySourceID: "source-1"}, 2, 1)
+		if err != nil {
+			t.Fatalf("expected no err, got %v", err)
+		}
+		if mc.lastScrollLimit != 3 {
+			t.Fatalf("expected scroll limit 3, got %d", mc.lastScrollLimit)
+		}
+		if len(records) != 2 || records[0].ID != "keep-1" || records[1].ID != "keep-2" {
+			t.Fatalf("offset not applied correctly: %+v", records)
+		}
+		if mc.lastScrollFilter == nil || len(mc.lastScrollFilter.Must) != 1 {
+			t.Fatalf("expected filter")
+		}
+		cond := mc.lastScrollFilter.Must[0].GetField()
+		if cond.Key != constants.PayloadFieldMetaPrefix+constants.MetaKeySourceID {
+			t.Fatalf("expected translated filter key, got %q", cond.Key)
 		}
 	})
 }

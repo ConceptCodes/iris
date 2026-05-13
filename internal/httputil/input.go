@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"iris/internal/constants"
+	"iris/internal/ssrf"
 	"iris/pkg/models"
 )
 
@@ -22,9 +23,9 @@ var SupportedUploadMIMETypes = map[string]struct{}{
 const maxJSONBodyBytes = 1 << 20
 
 type ImageUpload struct {
-	Bytes     []byte
-	Filename  string
-	MIMEType  string
+	Bytes    []byte
+	Filename string
+	MIMEType string
 }
 
 type ImageSearchInput struct {
@@ -61,6 +62,9 @@ func ParseMultipartImage(r *http.Request, maxBytes int64) (*ImageUpload, error) 
 		}
 	}
 	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if !ValidateImageMIME(contentType) {
+		return nil, &HTTPError{Status: http.StatusBadRequest, Message: "unsupported image type: use JPG, PNG, WebP, GIF, BMP, or TIFF"}
+	}
 
 	buf, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
@@ -136,11 +140,29 @@ func ParseSearchImageURLInput(r *http.Request) (*ImageURLSearchInput, error) {
 	if req.URL == "" {
 		return nil, &HTTPError{Status: http.StatusBadRequest, Message: constants.MessageURLRequired}
 	}
+	if err := ssrf.NewValidator().ValidateURL(r.Context(), req.URL); err != nil {
+		return nil, &HTTPError{Status: http.StatusBadRequest, Message: "SSRF blocked: " + err.Error()}
+	}
 	return &ImageURLSearchInput{
 		URL:     req.URL,
 		TopK:    req.TopK,
 		Filters: req.Filters,
 		Encoder: models.NormalizeEncoder(req.Encoder),
+	}, nil
+}
+
+func ParseFormImageURLSearchInput(r *http.Request) (*ImageURLSearchInput, error) {
+	imageURL := r.FormValue("url")
+	if imageURL == "" {
+		return nil, &HTTPError{Status: http.StatusBadRequest, Message: constants.ErrorMsgURLRequired}
+	}
+	if err := ssrf.NewValidator().ValidateURL(r.Context(), imageURL); err != nil {
+		return nil, &HTTPError{Status: http.StatusBadRequest, Message: "SSRF blocked: " + err.Error()}
+	}
+	return &ImageURLSearchInput{
+		URL:     imageURL,
+		TopK:    constants.DefaultLimit40,
+		Encoder: models.NormalizeEncoder(models.Encoder(r.FormValue("encoder"))),
 	}, nil
 }
 

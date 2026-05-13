@@ -12,7 +12,6 @@ import (
 	"iris/internal/constants"
 	"iris/internal/httputil"
 	"iris/internal/search"
-	"iris/internal/ssrf"
 	"iris/pkg/models"
 	"iris/web/templates"
 )
@@ -46,7 +45,7 @@ func (h *Handlers) SearchResults(w http.ResponseWriter, r *http.Request) {
 	topK := constants.DefaultLimit40
 	filters := map[string]string{}
 	if filterType != "" {
-		filters[constants.PayloadFieldMetaPrefix+constants.MetaKeyContentType] = filterType
+		filters[constants.MetaKeyContentType] = filterType
 	}
 
 	results, err := h.engine.SearchByText(r.Context(), models.TextSearchRequest{
@@ -137,26 +136,23 @@ func (h *Handlers) ReverseImageSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) ReverseImageSearchURL(w http.ResponseWriter, r *http.Request) {
-	imageURL := r.FormValue("url")
-	encoder := models.NormalizeEncoder(models.Encoder(r.FormValue("encoder")))
-	if imageURL == "" {
-		http.Error(w, constants.ErrorMsgURLRequired, http.StatusBadRequest)
+	input, err := httputil.ParseFormImageURLSearchInput(r)
+	if err != nil {
+		if httpErr, ok := err.(*httputil.HTTPError); ok {
+			http.Error(w, httpErr.Message, httpErr.Status)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
 		return
 	}
 
-	validator := ssrf.NewValidator()
-	if err := validator.ValidateURL(r.Context(), imageURL); err != nil {
-		http.Error(w, "SSRF blocked: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	results, err := h.engine.SearchByImageURL(r.Context(), imageURL, constants.DefaultLimit40, nil, encoder)
+	results, err := h.engine.SearchByImageURL(r.Context(), input.URL, input.TopK, nil, input.Encoder)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if r.Header.Get(constants.HeaderHXRequest) == "true" {
-		templ.Handler(templates.ResultsGrid(results, imageURL, 1)).ServeHTTP(w, r)
+		templ.Handler(templates.ResultsGrid(results, input.URL, 1)).ServeHTTP(w, r)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
