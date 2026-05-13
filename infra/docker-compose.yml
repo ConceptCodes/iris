@@ -130,7 +130,7 @@ services:
       context: ..
       dockerfile: infra/Dockerfile
       target: worker
-    command: ["-seed-url-file", "/examples/demo-urls.txt"]
+    command: ["-seed-url-file", "/examples/random-1000-urls.txt"]
     env_file:
       - .env.docker
     volumes:
