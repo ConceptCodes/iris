@@ -4,13 +4,13 @@
 package web
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/a-h/templ"
 	"iris/internal/constants"
+	"iris/internal/httputil"
 	"iris/internal/search"
 	"iris/internal/ssrf"
 	"iris/pkg/models"
@@ -19,15 +19,6 @@ import (
 
 type Handlers struct {
 	engine search.Engine
-}
-
-var supportedUploadMIMETypes = map[string]struct{}{
-	constants.MIMETypeJPEG: {},
-	constants.MIMETypePNG:  {},
-	constants.MIMETypeWEBP: {},
-	constants.MIMETypeGIF:  {},
-	constants.MIMETypeBMP:  {},
-	constants.MIMETypeTIFF: {},
 }
 
 func NewHandlers(engine search.Engine) *Handlers {
@@ -119,48 +110,21 @@ func (h *Handlers) RelatedImages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) ReverseImageSearch(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(constants.MaxImageSize); err != nil {
-		http.Error(w, constants.MessageFileTooLarge, http.StatusBadRequest)
-		return
-	}
-	file, header, err := r.FormFile("image")
+	upload, err := httputil.ParseMultipartImage(r, constants.MaxImageSize)
 	if err != nil {
-		http.Error(w, constants.MessageImageRequired, http.StatusBadRequest)
+		if httpErr, ok := err.(*httputil.HTTPError); ok {
+			http.Error(w, httpErr.Message, httpErr.Status)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
 		return
 	}
-	defer file.Close()
-
-	contentType := header.Header.Get(constants.HeaderContentType)
-	if contentType == "" {
-		sniff := make([]byte, 512)
-		n, _ := io.ReadFull(file, sniff)
-		contentType = http.DetectContentType(sniff[:n])
-		if _, err := file.Seek(0, io.SeekStart); err != nil {
-			http.Error(w, constants.MsgFailedToReadFile, http.StatusInternalServerError)
-			return
-		}
-	}
-	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	if _, ok := supportedUploadMIMETypes[contentType]; !ok {
+	if !httputil.ValidateImageMIME(upload.MIMEType) {
 		http.Error(w, "unsupported image type: use JPG, PNG, WebP, GIF, BMP, or TIFF", http.StatusBadRequest)
 		return
 	}
-
-	buf, err := io.ReadAll(io.LimitReader(file, constants.MaxImageSize+1))
-	if err != nil {
-		http.Error(w, constants.MsgFailedToReadFile, http.StatusInternalServerError)
-		return
-	}
-	if len(buf) > constants.MaxImageSize {
-		http.Error(w, constants.MessageFileTooLarge, http.StatusBadRequest)
-		return
-	}
-	if len(buf) == 0 {
-		http.Error(w, constants.MsgFailedToReadFile, http.StatusInternalServerError)
-		return
-	}
 	encoder := models.NormalizeEncoder(models.Encoder(r.FormValue("encoder")))
-	results, err := h.engine.SearchByImageBytes(r.Context(), buf, constants.DefaultLimit40, nil, encoder)
+	results, err := h.engine.SearchByImageBytes(r.Context(), upload.Bytes, constants.DefaultLimit40, nil, encoder)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
