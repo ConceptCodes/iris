@@ -6,33 +6,16 @@ import (
 	"sort"
 	"time"
 
+	"iris/internal/authority"
 	"iris/internal/constants"
 	"iris/pkg/models"
 )
 
-// AuthorityTracker provides domain authority scores for re-ranking.
-type AuthorityTracker interface {
-	GetAuthority(ctx context.Context, domain string) float32
-}
-
-// DefaultAuthorityTracker provides a simple default authority tracker.
-type DefaultAuthorityTracker struct{}
-
-// GetAuthority returns a default authority score based on the domain.
-// This is a simple implementation that can be replaced with a more sophisticated one.
-func (d *DefaultAuthorityTracker) GetAuthority(ctx context.Context, domain string) float32 {
-	// Return a neutral default score (0.5) for all domains
-	// This can be enhanced with domain reputation scoring, DNS verification, etc.
-	return 0.5
-}
-
-// Ranker applies weighted hybrid scoring to search results.
 type Ranker struct {
-	authorityTracker AuthorityTracker
+	authorityTracker authority.Tracker
 }
 
-// NewRanker creates a new Ranker instance.
-func NewRanker(tracker AuthorityTracker) *Ranker {
+func NewRanker(tracker authority.Tracker) *Ranker {
 	return &Ranker{
 		authorityTracker: tracker,
 	}

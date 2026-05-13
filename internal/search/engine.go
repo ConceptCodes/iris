@@ -21,8 +21,6 @@ import (
 	"iris/internal/tracing"
 	"iris/pkg/models"
 
-	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -72,108 +70,19 @@ func NewEngine(encoders *encoder.Registry, qdrantStore VectorStore, ranker *Rank
 	}
 }
 
-var tracer = otel.Tracer("iris/search")
-
 func (e *engineImpl) IndexFromURL(ctx context.Context, req models.IndexRequest) (string, error) {
-	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "IndexFromURL",
-		[]attribute.KeyValue{
-			attribute.String("url", req.URL),
-			attribute.String("filename", req.Filename),
-			attribute.Int("tags_count", len(req.Tags)),
-		},
-	)
-	defer span.End()
-
-	if e.store == nil {
-		tracing.AddErrorToSpan(span, errSearchUnavailable)
-		return "", errSearchUnavailable
-	}
-	if existing, ok, err := e.FindExistingID(ctx, req.Meta, req.URL); err != nil {
-		tracing.AddErrorToSpan(span, err)
-		return "", err
-	} else if ok {
-		return existing, nil
-	}
-	embeddings, err := e.embedAllImageURLs(ctx, req.URL)
-	if err != nil {
-		tracing.AddErrorToSpan(span, err)
-		return "", err
-	}
-	record := models.ImageRecord{
-		ID:       uuid.New().String(),
-		URL:      req.URL,
-		Filename: req.Filename,
-		Tags:     req.Tags,
-		Meta:     req.Meta,
-	}
-	id, err := e.store.Upsert(ctx, record, embeddings)
-	if err != nil {
-		tracing.AddErrorToSpan(span, err)
-		return "", err
-	}
-	if e.tracker != nil {
-		e.tracker.RecordDomain(ctx, req.URL)
-	}
-	return id, nil
+	ix := NewIndexer(e.encoders, e.store, e.tracker)
+	return ix.IndexFromURL(ctx, req)
 }
 
 func (e *engineImpl) IndexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
-	ctx, span := tracing.StartSpanWithAttributes(ctx, tracer, "IndexFromBytes",
-		[]attribute.KeyValue{
-			attribute.Int("image_size", len(imageBytes)),
-			attribute.String("filename", record.Filename),
-			attribute.Int("tags_count", len(record.Tags)),
-		},
-	)
-	defer span.End()
-
-	if e.store == nil {
-		tracing.AddErrorToSpan(span, errSearchUnavailable)
-		return "", errSearchUnavailable
-	}
-	if existing, ok, err := e.FindExistingID(ctx, record.Meta, ""); err != nil {
-		tracing.AddErrorToSpan(span, err)
-		return "", err
-	} else if ok {
-		return existing, nil
-	}
-	if record.ID == "" {
-		record.ID = uuid.New().String()
-	}
-	embeddings, err := e.embedAllImageBytes(ctx, imageBytes)
-	if err != nil {
-		tracing.AddErrorToSpan(span, err)
-		return "", err
-	}
-	id, err := e.store.Upsert(ctx, record, embeddings)
-	if err != nil {
-		tracing.AddErrorToSpan(span, err)
-		return "", err
-	}
-	if e.tracker != nil && record.URL != "" {
-		e.tracker.RecordDomain(ctx, record.URL)
-	}
-	return id, nil
+	ix := NewIndexer(e.encoders, e.store, e.tracker)
+	return ix.IndexFromBytes(ctx, imageBytes, record)
 }
 
 func (e *engineImpl) ReindexFromBytes(ctx context.Context, imageBytes []byte, record models.ImageRecord) (string, error) {
-	if e.store == nil {
-		return "", errSearchUnavailable
-	}
-	if record.ID == "" {
-		if existing, ok, err := e.FindExistingID(ctx, record.Meta, ""); err != nil {
-			return "", err
-		} else if ok {
-			record.ID = existing
-		} else {
-			record.ID = uuid.New().String()
-		}
-	}
-	embeddings, err := e.embedAllImageBytes(ctx, imageBytes)
-	if err != nil {
-		return "", err
-	}
-	return e.store.Upsert(ctx, record, embeddings)
+	ix := NewIndexer(e.encoders, e.store, e.tracker)
+	return ix.ReindexFromBytes(ctx, imageBytes, record)
 }
 
 func (e *engineImpl) SearchByText(ctx context.Context, req models.TextSearchRequest) ([]models.SearchResult, error) {
@@ -309,72 +218,13 @@ func (e *engineImpl) GetSimilar(ctx context.Context, id string, topK int, enc mo
 }
 
 func (e *engineImpl) FindExistingID(ctx context.Context, meta map[string]string, fallbackURL string) (string, bool, error) {
-	if meta == nil {
-		meta = map[string]string{}
-	}
-	if hash := meta[constants.MetaKeyContentSHA256]; hash != "" {
-		if id, ok, err := e.store.FindIDByMeta(ctx, constants.PayloadFieldMetaPrefix+constants.MetaKeyContentSHA256, hash); err != nil {
-			return "", false, err
-		} else if ok {
-			return id, true, nil
-		}
-	}
-	if source := meta[constants.MetaKeySourceURL]; source != "" {
-		if id, ok, err := e.store.FindIDByMeta(ctx, constants.PayloadFieldMetaPrefix+constants.MetaKeySourceURL, source); err != nil {
-			return "", false, err
-		} else if ok {
-			return id, true, nil
-		}
-	}
-	if fallbackURL != "" {
-		if id, ok, err := e.store.FindIDByMeta(ctx, constants.PayloadFieldMetaPrefix+constants.MetaKeySourceURL, fallbackURL); err != nil {
-			return "", false, err
-		} else if ok {
-			return id, true, nil
-		}
-	}
-	return "", false, nil
+	deduper := NewDeduper(e.store)
+	return deduper.FindExistingID(ctx, meta, fallbackURL)
 }
 
 func (e *engineImpl) ListImages(ctx context.Context, filters map[string]string, limit, offset uint32) ([]models.ImageRecord, error) {
-	if e.store == nil {
-		return nil, errSearchUnavailable
-	}
-	return e.store.ListImages(ctx, filters, limit, offset)
-}
-
-func (e *engineImpl) embedAllImageURLs(ctx context.Context, imageURL string) (models.Embeddings, error) {
-	embeddings := make(models.Embeddings, len(e.encoders.Names()))
-	for _, name := range e.encoders.Names() {
-		_, client, err := e.encoders.Resolve(name)
-		if err != nil {
-			return nil, err
-		}
-		embedding, err := client.EmbedImageURL(ctx, imageURL)
-		if err != nil {
-			return nil, fmt.Errorf("%s embed image url: %w", name, err)
-		}
-		normalize(embedding)
-		embeddings[name] = embedding
-	}
-	return embeddings, nil
-}
-
-func (e *engineImpl) embedAllImageBytes(ctx context.Context, imageBytes []byte) (models.Embeddings, error) {
-	embeddings := make(models.Embeddings, len(e.encoders.Names()))
-	for _, name := range e.encoders.Names() {
-		_, client, err := e.encoders.Resolve(name)
-		if err != nil {
-			return nil, err
-		}
-		embedding, err := client.EmbedImageBytes(ctx, imageBytes)
-		if err != nil {
-			return nil, fmt.Errorf("%s embed image bytes: %w", name, err)
-		}
-		normalize(embedding)
-		embeddings[name] = embedding
-	}
-	return embeddings, nil
+	catalog := NewCatalog(e.store)
+	return catalog.ListImages(ctx, filters, limit, offset)
 }
 
 func normalize(vec models.Embedding) {
