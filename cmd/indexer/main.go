@@ -64,9 +64,8 @@ func main() {
 	}
 	defer qdrantStore.Close()
 
-	// Initialize ranker for hybrid scoring
-	ranker := search.NewRanker(&search.DefaultAuthorityTracker{})
 	tracker := authority.NewMemoryStore(nil)
+	ranker := search.NewRanker(tracker)
 	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
 	assetStore, err := assets.NewStoreFromSettings(context.Background(), assets.Settings{
 		Backend: cfg.AssetBackend,

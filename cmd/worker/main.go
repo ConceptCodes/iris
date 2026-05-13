@@ -241,9 +241,8 @@ func initializeIndexerPipeline(ctx context.Context, cfg config.Worker) (*indexer
 		return nil, err
 	}
 
-	// Initialize ranker for hybrid scoring
-	ranker := search.NewRanker(&search.DefaultAuthorityTracker{})
 	tracker := authority.NewMemoryStore(nil)
+	ranker := search.NewRanker(tracker)
 	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
 	assetStore, err := assets.NewStoreFromSettings(ctx, assets.Settings{
 		Backend: cfg.AssetBackend,

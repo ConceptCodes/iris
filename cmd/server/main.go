@@ -54,9 +54,8 @@ func main() {
 		defer qdrantStore.Close()
 	}
 
-	// Initialize ranker for hybrid scoring
-	ranker := search.NewRanker(&search.DefaultAuthorityTracker{})
 	tracker := authority.NewMemoryStore(nil)
+	ranker := search.NewRanker(tracker)
 	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
 	crawlService, jobStore, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN, cfg.PostgresPool)
 	if err != nil {
