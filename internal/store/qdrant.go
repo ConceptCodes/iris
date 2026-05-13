@@ -317,7 +317,25 @@ func (s *QdrantStore) recordToPayload(record models.ImageRecord) map[string]*pb.
 		constants.PayloadFieldFilename: {Kind: &pb.Value_StringValue{StringValue: record.Filename}},
 	}
 	if record.ThumbnailURL != "" {
-		payload["thumbnail_url"] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: record.ThumbnailURL}}
+		payload[constants.PayloadFieldThumbnailURL] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: record.ThumbnailURL}}
+	}
+	if record.ImageWidth > 0 {
+		payload[constants.PayloadFieldImageWidth] = &pb.Value{Kind: &pb.Value_IntegerValue{IntegerValue: int64(record.ImageWidth)}}
+	}
+	if record.ImageHeight > 0 {
+		payload[constants.PayloadFieldImageHeight] = &pb.Value{Kind: &pb.Value_IntegerValue{IntegerValue: int64(record.ImageHeight)}}
+	}
+	if record.FileSize > 0 {
+		payload[constants.PayloadFieldFileSize] = &pb.Value{Kind: &pb.Value_IntegerValue{IntegerValue: record.FileSize}}
+	}
+	if record.ColorDepth != "" {
+		payload[constants.PayloadFieldColorDepth] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: record.ColorDepth}}
+	}
+	if record.QualityScore > 0 {
+		payload[constants.PayloadFieldQualityScore] = &pb.Value{Kind: &pb.Value_DoubleValue{DoubleValue: float64(record.QualityScore)}}
+	}
+	if record.IndexedAt != "" {
+		payload[constants.PayloadFieldIndexedAt] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: record.IndexedAt}}
 	}
 	if len(record.Tags) > 0 {
 		tags := make([]*pb.Value, len(record.Tags))
@@ -351,9 +369,39 @@ func (s *QdrantStore) payloadToRecord(payload map[string]*pb.Value) models.Image
 			record.Filename = sv.StringValue
 		}
 	}
-	if v, ok := payload["thumbnail_url"]; ok {
+	if v, ok := payload[constants.PayloadFieldThumbnailURL]; ok {
 		if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
 			record.ThumbnailURL = sv.StringValue
+		}
+	}
+	if v, ok := payload[constants.PayloadFieldImageWidth]; ok {
+		if iv, ok := v.Kind.(*pb.Value_IntegerValue); ok {
+			record.ImageWidth = int(iv.IntegerValue)
+		}
+	}
+	if v, ok := payload[constants.PayloadFieldImageHeight]; ok {
+		if iv, ok := v.Kind.(*pb.Value_IntegerValue); ok {
+			record.ImageHeight = int(iv.IntegerValue)
+		}
+	}
+	if v, ok := payload[constants.PayloadFieldFileSize]; ok {
+		if iv, ok := v.Kind.(*pb.Value_IntegerValue); ok {
+			record.FileSize = iv.IntegerValue
+		}
+	}
+	if v, ok := payload[constants.PayloadFieldColorDepth]; ok {
+		if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
+			record.ColorDepth = sv.StringValue
+		}
+	}
+	if v, ok := payload[constants.PayloadFieldQualityScore]; ok {
+		if dv, ok := v.Kind.(*pb.Value_DoubleValue); ok {
+			record.QualityScore = float32(dv.DoubleValue)
+		}
+	}
+	if v, ok := payload[constants.PayloadFieldIndexedAt]; ok {
+		if sv, ok := v.Kind.(*pb.Value_StringValue); ok {
+			record.IndexedAt = sv.StringValue
 		}
 	}
 	if v, ok := payload[constants.PayloadFieldTags]; ok {

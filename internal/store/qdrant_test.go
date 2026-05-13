@@ -21,10 +21,17 @@ func TestNewQdrantStore_Timeout(t *testing.T) {
 
 func TestQdrantStore_PayloadRoundtrip(t *testing.T) {
 	record := models.ImageRecord{
-		ID:       "test-id",
-		URL:      "http://x.com",
-		Filename: "x.jpg",
-		Tags:     []string{"a", "b"},
+		ID:           "test-id",
+		URL:          "http://x.com",
+		Filename:     "x.jpg",
+		ThumbnailURL: "http://cdn/x_thumb.jpg",
+		Tags:         []string{"a", "b"},
+		ImageWidth:   1920,
+		ImageHeight:  1080,
+		FileSize:     2048000,
+		ColorDepth:   "rgb",
+		QualityScore: 0.85,
+		IndexedAt:    "2025-01-15T10:30:00Z",
 		Meta: map[string]string{
 			"color": "red",
 		},
@@ -33,8 +40,41 @@ func TestQdrantStore_PayloadRoundtrip(t *testing.T) {
 	payload := s.recordToPayload(record)
 	roundtrip := s.payloadToRecord(payload)
 
-	if roundtrip.ID != record.ID || roundtrip.URL != record.URL || roundtrip.Filename != record.Filename || len(roundtrip.Tags) != 2 || roundtrip.Meta["color"] != "red" {
-		t.Errorf("roundtrip mismatch: got %+v", roundtrip)
+	if roundtrip.ID != record.ID {
+		t.Errorf("ID mismatch: got %q want %q", roundtrip.ID, record.ID)
+	}
+	if roundtrip.URL != record.URL {
+		t.Errorf("URL mismatch: got %q want %q", roundtrip.URL, record.URL)
+	}
+	if roundtrip.Filename != record.Filename {
+		t.Errorf("Filename mismatch: got %q want %q", roundtrip.Filename, record.Filename)
+	}
+	if roundtrip.ThumbnailURL != record.ThumbnailURL {
+		t.Errorf("ThumbnailURL mismatch: got %q want %q", roundtrip.ThumbnailURL, record.ThumbnailURL)
+	}
+	if len(roundtrip.Tags) != 2 {
+		t.Errorf("Tags mismatch: got %d want 2", len(roundtrip.Tags))
+	}
+	if roundtrip.ImageWidth != record.ImageWidth {
+		t.Errorf("ImageWidth mismatch: got %d want %d", roundtrip.ImageWidth, record.ImageWidth)
+	}
+	if roundtrip.ImageHeight != record.ImageHeight {
+		t.Errorf("ImageHeight mismatch: got %d want %d", roundtrip.ImageHeight, record.ImageHeight)
+	}
+	if roundtrip.FileSize != record.FileSize {
+		t.Errorf("FileSize mismatch: got %d want %d", roundtrip.FileSize, record.FileSize)
+	}
+	if roundtrip.ColorDepth != record.ColorDepth {
+		t.Errorf("ColorDepth mismatch: got %q want %q", roundtrip.ColorDepth, record.ColorDepth)
+	}
+	if roundtrip.QualityScore != record.QualityScore {
+		t.Errorf("QualityScore mismatch: got %f want %f", roundtrip.QualityScore, record.QualityScore)
+	}
+	if roundtrip.IndexedAt != record.IndexedAt {
+		t.Errorf("IndexedAt mismatch: got %q want %q", roundtrip.IndexedAt, record.IndexedAt)
+	}
+	if roundtrip.Meta["color"] != "red" {
+		t.Errorf("Meta color mismatch: got %q want %q", roundtrip.Meta["color"], "red")
 	}
 }
 

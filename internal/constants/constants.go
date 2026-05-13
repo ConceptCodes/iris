@@ -186,10 +186,17 @@ const (
 
 // Qdrant Payload Fields
 const (
-	PayloadFieldID       = "id"
-	PayloadFieldURL      = "url"
-	PayloadFieldFilename = "filename"
-	PayloadFieldTags     = "tags"
+	PayloadFieldID           = "id"
+	PayloadFieldURL          = "url"
+	PayloadFieldFilename     = "filename"
+	PayloadFieldTags         = "tags"
+	PayloadFieldThumbnailURL = "thumbnail_url"
+	PayloadFieldImageWidth   = "image_width"
+	PayloadFieldImageHeight  = "image_height"
+	PayloadFieldFileSize     = "file_size"
+	PayloadFieldColorDepth   = "color_depth"
+	PayloadFieldQualityScore = "quality_score"
+	PayloadFieldIndexedAt    = "indexed_at"
 )
 
 // Special Strings
