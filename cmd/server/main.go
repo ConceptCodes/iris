@@ -11,11 +11,8 @@ import (
 
 	"iris/config"
 	"iris/internal/api"
-	"iris/internal/authority"
 	"iris/internal/constants"
-	"iris/internal/encoder"
-	"iris/internal/search"
-	"iris/internal/store"
+	appruntime "iris/internal/runtime"
 	"iris/internal/tracing"
 )
 
@@ -41,29 +38,25 @@ func main() {
 		}
 	}
 
-	encoderRegistry, cleanupEncoders, err := encoder.NewRegistryFromConfig(cfg.Shared)
+	runtimeCfg := appruntime.ConfigFromShared(cfg.Shared)
+	runtimeCfg.ConnectTimeout = 3 * time.Second
+	searchRuntime, err := appruntime.NewSearchRuntime(cfg.Shared, runtimeCfg, true)
 	if err != nil {
-		slog.Error("failed to create encoder registry", "error", err)
+		slog.Error("failed to initialize search runtime", "error", err)
 		os.Exit(1)
 	}
-	defer cleanupEncoders()
-	qdrantStore, err := store.NewQdrantStoreWithEncoders(cfg.QdrantAddr, cfg.EncoderDims(), 3*time.Second)
-	if err != nil {
-		slog.Error("failed to connect to qdrant, search will be unavailable", "error", err)
-	} else {
-		defer qdrantStore.Close()
+	defer searchRuntime.Close()
+	if searchRuntime.QdrantErr != nil {
+		slog.Error("failed to connect to qdrant, search will be unavailable", "error", searchRuntime.QdrantErr)
 	}
 
-	tracker := authority.NewMemoryStore(nil)
-	ranker := search.NewRanker(tracker)
-	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
 	crawlService, jobStore, cleanup, err := api.NewCrawlService(cfg.JobBackend, cfg.JobStoreDSN, cfg.PostgresPool)
 	if err != nil {
 		slog.Error("failed to initialize crawl service", "error", err)
 	} else if cleanup != nil {
 		defer cleanup()
 	}
-	router := api.NewRouterWithAssetsAndAuth(engine, api.AssetsSettings{
+	router := api.NewRouterWithAssetsAndAuth(searchRuntime.Engine, api.AssetsSettings{
 		Backend:      cfg.AssetBackend,
 		Bucket:       cfg.AssetBucket,
 		Region:       cfg.AssetRegion,

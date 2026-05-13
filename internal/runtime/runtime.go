@@ -75,7 +75,17 @@ type IngestionRuntime struct {
 	cleanupEncoders func()
 }
 
-func NewIngestionRuntime(ctx context.Context, shared config.Shared, cfg Config) (*IngestionRuntime, error) {
+type SearchRuntime struct {
+	EncoderRegistry *encoder.Registry
+	QdrantStore     *store.QdrantStore
+	QdrantErr       error
+	Ranker          *search.Ranker
+	Authority       authority.Tracker
+	Engine          search.Engine
+	cleanupEncoders func()
+}
+
+func NewSearchRuntime(shared config.Shared, cfg Config, allowUnavailableStore bool) (*SearchRuntime, error) {
 	encoderRegistry, cleanupEncoders, err := encoder.NewRegistryFromConfig(shared)
 	if err != nil {
 		return nil, fmt.Errorf("create encoder registry: %w", err)
@@ -83,13 +93,42 @@ func NewIngestionRuntime(ctx context.Context, shared config.Shared, cfg Config) 
 
 	qdrantStore, err := store.NewQdrantStoreWithEncoders(cfg.QdrantAddr, cfg.EncoderDims, cfg.ConnectTimeout)
 	if err != nil {
-		cleanupEncoders()
-		return nil, fmt.Errorf("connect to qdrant: %w", err)
+		if !allowUnavailableStore {
+			cleanupEncoders()
+			return nil, fmt.Errorf("connect to qdrant: %w", err)
+		}
+		qdrantStore = nil
 	}
 
 	tracker := authority.NewMemoryStore(nil)
 	ranker := search.NewRanker(tracker)
 	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
+
+	return &SearchRuntime{
+		EncoderRegistry: encoderRegistry,
+		QdrantStore:     qdrantStore,
+		QdrantErr:       err,
+		Ranker:          ranker,
+		Authority:       tracker,
+		Engine:          engine,
+		cleanupEncoders: cleanupEncoders,
+	}, nil
+}
+
+func (r *SearchRuntime) Close() {
+	if r.QdrantStore != nil {
+		r.QdrantStore.Close()
+	}
+	if r.cleanupEncoders != nil {
+		r.cleanupEncoders()
+	}
+}
+
+func NewIngestionRuntime(ctx context.Context, shared config.Shared, cfg Config) (*IngestionRuntime, error) {
+	searchRuntime, err := NewSearchRuntime(shared, cfg, false)
+	if err != nil {
+		return nil, err
+	}
 
 	assetStore, err := assets.NewStoreFromSettings(ctx, assets.Settings{
 		Backend: cfg.AssetBackend,
@@ -106,29 +145,29 @@ func NewIngestionRuntime(ctx context.Context, shared config.Shared, cfg Config) 
 		},
 	})
 	if err != nil {
-		qdrantStore.Close()
-		cleanupEncoders()
+		searchRuntime.Close()
 		return nil, fmt.Errorf("create asset store: %w", err)
 	}
 
-	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
+	pipeline := indexing.NewPipelineWithOptions(searchRuntime.Engine, indexing.PipelineOptions{
 		AssetStore:               assetStore,
 		Enricher:                 newMetadataEnricher(cfg.MetadataAddr, cfg.MetadataTimeout),
 		MaxFetchBytes:            cfg.MaxFetchBytes,
 		FetchClient:              cfg.FetchClient,
+		FetchTimeout:             cfg.FetchTimeout,
 		UserAgent:                cfg.UserAgent,
 		SSRFAllowPrivateNetworks: cfg.SSRFAllowPrivateNetworks,
 	})
 
 	return &IngestionRuntime{
-		EncoderRegistry: encoderRegistry,
-		QdrantStore:     qdrantStore,
-		Ranker:          ranker,
-		Authority:       tracker,
-		Engine:          engine,
+		EncoderRegistry: searchRuntime.EncoderRegistry,
+		QdrantStore:     searchRuntime.QdrantStore,
+		Ranker:          searchRuntime.Ranker,
+		Authority:       searchRuntime.Authority,
+		Engine:          searchRuntime.Engine,
 		AssetStore:      assetStore,
 		Pipeline:        pipeline,
-		cleanupEncoders: cleanupEncoders,
+		cleanupEncoders: searchRuntime.cleanupEncoders,
 	}, nil
 }
 

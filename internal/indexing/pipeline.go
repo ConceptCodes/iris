@@ -10,12 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"iris/internal/assets"
 	"iris/internal/constants"
+	"iris/internal/indexing/stages"
 	"iris/internal/metadata"
 	"iris/internal/metrics"
-	"iris/internal/indexing/stages"
 	"iris/pkg/models"
 
 	"github.com/google/uuid"
@@ -51,6 +52,7 @@ type PipelineOptions struct {
 	Enricher                 metadata.Enricher
 	MaxFetchBytes            int
 	FetchClient              *http.Client
+	FetchTimeout             time.Duration
 	UserAgent                string
 	SSRFAllowPrivateNetworks bool
 	ThumbnailWidth           int
@@ -63,7 +65,7 @@ func NewPipeline(engine Engine) *Pipeline {
 		engine: engine,
 		options: PipelineOptions{
 			MaxFetchBytes:    constants.MaxImageSize,
-			FetchClient:      &http.Client{Timeout: constants.HTTPTimeout30s},
+			FetchTimeout:     constants.HTTPTimeout30s,
 			UserAgent:        constants.DefaultCrawlerUserAgent,
 			ThumbnailWidth:   250,
 			ThumbnailHeight:  0, // Preserve aspect ratio
@@ -76,8 +78,8 @@ func NewPipelineWithOptions(engine Engine, options PipelineOptions) *Pipeline {
 	if options.MaxFetchBytes <= 0 {
 		options.MaxFetchBytes = constants.MaxImageSize
 	}
-	if options.FetchClient == nil {
-		options.FetchClient = &http.Client{Timeout: constants.HTTPTimeout30s}
+	if options.FetchTimeout <= 0 {
+		options.FetchTimeout = constants.HTTPTimeout30s
 	}
 	if strings.TrimSpace(options.UserAgent) == "" {
 		options.UserAgent = constants.DefaultCrawlerUserAgent
@@ -251,6 +253,7 @@ func (p *Pipeline) fetchConfig() stages.FetchConfig {
 		MaxBytes:                 p.options.MaxFetchBytes,
 		UserAgent:                p.options.UserAgent,
 		SSRFAllowPrivateNetworks: p.options.SSRFAllowPrivateNetworks,
+		Timeout:                  p.options.FetchTimeout,
 	}
 }
 

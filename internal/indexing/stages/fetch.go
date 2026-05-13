@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"iris/internal/constants"
 	errpkg "iris/internal/error"
@@ -23,25 +24,26 @@ type FetchConfig struct {
 	MaxBytes                 int
 	UserAgent                string
 	SSRFAllowPrivateNetworks bool
+	Timeout                  time.Duration
 }
 
 func DefaultFetchConfig() FetchConfig {
 	return FetchConfig{
-		Client:   &http.Client{Timeout: constants.HTTPTimeout30s},
-		MaxBytes: constants.MaxImageSize,
+		MaxBytes:  constants.MaxImageSize,
 		UserAgent: constants.DefaultCrawlerUserAgent,
+		Timeout:   constants.HTTPTimeout30s,
 	}
 }
 
 func FetchImageBytes(ctx context.Context, rawURL string, cfg FetchConfig) (*FetchResult, error) {
-	if cfg.Client == nil {
-		cfg.Client = &http.Client{Timeout: constants.HTTPTimeout30s}
-	}
 	if cfg.MaxBytes <= 0 {
 		cfg.MaxBytes = constants.MaxImageSize
 	}
 	if strings.TrimSpace(cfg.UserAgent) == "" {
 		cfg.UserAgent = constants.DefaultCrawlerUserAgent
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = constants.HTTPTimeout30s
 	}
 
 	validator := ssrf.NewValidator(ssrf.WithAllowPrivateNetworks(cfg.SSRFAllowPrivateNetworks))
@@ -55,7 +57,14 @@ func FetchImageBytes(ctx context.Context, rawURL string, cfg FetchConfig) (*Fetc
 	}
 	req.Header.Set(constants.HeaderUserAgent, cfg.UserAgent)
 
-	safeClient := validator.NewSafeClient(constants.HTTPTimeout30s)
+	safeClient := validator.NewSafeClient(cfg.Timeout)
+	if cfg.Client != nil {
+		client := *cfg.Client
+		if client.CheckRedirect == nil {
+			client.CheckRedirect = validator.HTTPCheckRedirect
+		}
+		safeClient = &client
+	}
 
 	resp, err := safeClient.Do(req)
 	if err != nil {

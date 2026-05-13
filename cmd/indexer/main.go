@@ -8,19 +8,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
+	stdruntime "runtime"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"iris/config"
-	"iris/internal/assets"
-	"iris/internal/authority"
-	"iris/internal/encoder"
 	"iris/internal/indexing"
-	"iris/internal/metadata"
-	"iris/internal/search"
-	"iris/internal/store"
+	appruntime "iris/internal/runtime"
 	"iris/pkg/models"
 )
 
@@ -51,51 +46,13 @@ func main() {
 
 	slog.Info("starting indexer", "mode", *mode, "input", *input, "concurrency", cfg.Concurrency)
 
-	encoderRegistry, cleanupEncoders, err := encoder.NewRegistryFromConfig(cfg.Shared)
+	ingestionRuntime, err := appruntime.NewIngestionRuntime(context.Background(), cfg.Shared, appruntime.ConfigFromShared(cfg.Shared))
 	if err != nil {
-		slog.Error("failed to create encoder registry", "error", err)
+		slog.Error("failed to initialize ingestion runtime", "error", err)
 		os.Exit(1)
 	}
-	defer cleanupEncoders()
-	qdrantStore, err := store.NewQdrantStoreWithEncoders(cfg.QdrantAddr, cfg.EncoderDims(), 15*time.Second)
-	if err != nil {
-		slog.Error("failed to connect to qdrant", "error", err)
-		os.Exit(1)
-	}
-	defer qdrantStore.Close()
-
-	tracker := authority.NewMemoryStore(nil)
-	ranker := search.NewRanker(tracker)
-	engine := search.NewEngine(encoderRegistry, qdrantStore, ranker, tracker)
-	assetStore, err := assets.NewStoreFromSettings(context.Background(), assets.Settings{
-		Backend: cfg.AssetBackend,
-		S3: assets.S3Config{
-			Bucket:       cfg.AssetBucket,
-			Region:       cfg.AssetRegion,
-			Endpoint:     cfg.AssetEndpoint,
-			AccessKey:    cfg.AssetAccessKey,
-			SecretKey:    cfg.AssetSecretKey,
-			SessionToken: cfg.AssetSessionKey,
-			Prefix:       cfg.AssetPrefix,
-			PublicBase:   cfg.AssetPublicBase,
-			UsePathStyle: cfg.AssetPathStyle,
-		},
-	})
-	if err != nil {
-		slog.Error("failed to initialize asset store", "error", err)
-		os.Exit(1)
-	}
-	pipeline := indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
-		AssetStore: assetStore})
-	if enricher := metadata.NewComposite(
-		metadata.EXIFEnricher{},
-		metadata.NewClient(cfg.MetadataAddr, 45*time.Second),
-	); enricher != nil {
-		pipeline = indexing.NewPipelineWithOptions(engine, indexing.PipelineOptions{
-			AssetStore: assetStore,
-			Enricher:   enricher,
-		})
-	}
+	defer ingestionRuntime.Close()
+	pipeline := ingestionRuntime.Pipeline
 
 	var jobs []string
 	switch *mode {
@@ -192,5 +149,5 @@ func collectURLJobs(path string) []string {
 }
 
 func init() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
+	stdruntime.GOMAXPROCS(stdruntime.NumCPU())
 }
